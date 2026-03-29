@@ -1,0 +1,20 @@
+client_id = "YOUR_APP_CLIENT_ID"
+name = "order-cancel-confirmation"
+application_url = "https://your-app.example.com"
+embedded = true
+handle = "order-cancel-confirmation"
+
+[access_scopes]
+scopes = "write_orders,read_orders,write_app_proxy"
+
+[auth]
+redirect_urls = [
+  "https://your-app.example.com/auth/callback",
+  "https://your-app.example.com/auth/shopify/callback",
+  "https://your-app.example.com/api/auth/callback"
+]
+
+[app_proxy]
+url = "/proxy"
+prefix = "apps"
+subpath = "order-cancel"

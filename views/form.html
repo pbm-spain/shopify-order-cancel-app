@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Request Cancellation</title>
+    <style nonce="{{NONCE}}">
+      body { font-family: Arial, sans-serif; max-width: 560px; margin: 40px auto; padding: 0 16px; color: #111; }
+      h1 { font-size: 28px; }
+      label { display: block; margin: 14px 0 6px; font-weight: 600; }
+      input { width: 100%; padding: 12px; border: 1px solid #ccc; border-radius: 8px; box-sizing: border-box; }
+      button { margin-top: 18px; width: 100%; background: #111; color: white; border: 0; padding: 14px; border-radius: 8px; cursor: pointer; font-size: 16px; }
+      button:hover { background: #333; }
+      button:disabled { background: #999; cursor: not-allowed; }
+      p.small { color: #555; font-size: 14px; }
+      .error { color: #c0392b; font-size: 14px; display: none; margin-top: 4px; }
+    </style>
+  </head>
+  <body>
+    <h1>Request Cancellation</h1>
+    <p>Enter the email address associated with your order and your order number. We will send you an email to confirm the cancellation.</p>
+    <form method="post" action="/apps/order-cancel/request" id="cancelForm">
+      <input type="hidden" name="_csrf" value="{{CSRF_TOKEN}}" />
+
+      <label for="email">Order Email</label>
+      <input id="email" name="email" type="email" required autocomplete="email" />
+
+      <label for="orderNumber">Order Number</label>
+      <input id="orderNumber" name="orderNumber" type="text" placeholder="#1234" required pattern="#[1-9]\d{0,18}" title="Order number must start with # followed by 1-19 digits (e.g. #1234)" />
+      <span class="error" id="orderError">Please enter a valid order number (e.g. #1234)</span>
+
+      <button type="submit" id="submitBtn">Send Confirmation Email</button>
+    </form>
+    <p class="small">Cancellation is only available if the order has not been shipped yet.</p>
+
+    <script nonce="{{NONCE}}">
+      const form = document.getElementById('cancelForm');
+      const orderInput = document.getElementById('orderNumber');
+      const orderError = document.getElementById('orderError');
+      const submitBtn = document.getElementById('submitBtn');
+
+      orderInput.addEventListener('input', () => {
+        const val = orderInput.value.trim();
+        const valid = /^#[1-9]\d{0,18}$/.test(val);
+        orderError.style.display = val && !valid ? 'block' : 'none';
+      });
+
+      form.addEventListener('submit', () => {
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Sending...';
+      });
+    </script>
+  </body>
+</html>

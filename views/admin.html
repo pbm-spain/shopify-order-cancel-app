@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Admin - Cancel App</title>
+  <style nonce="{{NONCE}}">
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #111; background: #f5f5f5; }
+    .header { background: #111; color: #fff; padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; }
+    .header h1 { font-size: 18px; font-weight: 600; }
+    .header a { color: #aaa; text-decoration: none; font-size: 14px; }
+    .container { max-width: 900px; margin: 24px auto; padding: 0 16px; }
+    .card { background: #fff; border-radius: 12px; padding: 24px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+    .card h2 { font-size: 18px; margin-bottom: 16px; }
+    .card h3 { font-size: 15px; margin: 16px 0 10px; color: #333; }
+    .card-desc { font-size: 13px; color: #666; margin-bottom: 12px; }
+    .toggle-row { display: flex; align-items: center; justify-content: space-between; }
+    .toggle-label { font-size: 15px; }
+    .toggle-sublabel { font-size: 13px; color: #666; margin-top: 2px; }
+    .switch { position: relative; width: 52px; height: 28px; flex-shrink: 0; }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background: #ccc; border-radius: 28px; transition: .3s; }
+    .slider::before { content: ''; position: absolute; height: 22px; width: 22px; left: 3px; bottom: 3px; background: #fff; border-radius: 50%; transition: .3s; }
+    input:checked + .slider { background: #27ae60; }
+    input:checked + .slider::before { transform: translateX(24px); }
+    .status-badge { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+    .badge-pending { background: #fef3c7; color: #92400e; }
+    .badge-approved { background: #d1fae5; color: #065f46; }
+    .badge-denied { background: #fee2e2; color: #991b1b; }
+    .badge-auto { background: #dbeafe; color: #1e40af; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th { text-align: left; padding: 10px 12px; border-bottom: 2px solid #e5e5e5; font-weight: 600; color: #555; font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
+    td { padding: 10px 12px; border-bottom: 1px solid #f0f0f0; vertical-align: middle; }
+    .btn { display: inline-block; padding: 6px 14px; border: 0; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; text-decoration: none; }
+    .btn-approve { background: #27ae60; color: #fff; }
+    .btn-approve:hover { background: #219a52; }
+    .btn-deny { background: #e5e5e5; color: #333; margin-left: 6px; }
+    .btn-deny:hover { background: #d0d0d0; }
+    .empty { color: #999; font-size: 14px; padding: 20px 0; text-align: center; }
+    .flash { padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; font-size: 14px; }
+    .flash-success { background: #d1fae5; color: #065f46; }
+    .flash-error { background: #fee2e2; color: #991b1b; }
+    /* Checkbox grid for statuses */
+    .cb-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 16px; }
+    .cb-label { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; cursor: pointer; font-size: 14px; transition: background .15s; }
+    .cb-label:hover { background: #f5f5f5; }
+    .cb-label input[type="checkbox"] { width: 16px; height: 16px; accent-color: #27ae60; cursor: pointer; flex-shrink: 0; }
+    .cb-text { flex: 1; }
+    .cb-code { font-size: 11px; color: #999; background: #f0f0f0; padding: 1px 6px; border-radius: 4px; }
+    .save-indicator { font-size: 13px; color: #27ae60; opacity: 0; transition: opacity .3s; margin-left: 8px; }
+    .save-indicator.show { opacity: 1; }
+    .divider { border: 0; border-top: 1px solid #eee; margin: 16px 0; }
+    .pagination { display: flex; justify-content: center; align-items: center; gap: 12px; margin-top: 20px; padding-top: 16px; border-top: 1px solid #f0f0f0; }
+    .pagination-btn { padding: 6px 14px; border: 1px solid #ddd; border-radius: 6px; background: #fff; cursor: pointer; font-size: 13px; font-weight: 600; transition: all .15s; }
+    .pagination-btn:hover:not(:disabled) { background: #f5f5f5; border-color: #999; }
+    .pagination-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .pagination-info { font-size: 13px; color: #666; min-width: 120px; text-align: center; }
+    @media (max-width: 600px) { .cb-grid { grid-template-columns: 1fr; } .pagination { gap: 8px; } .pagination-btn { padding: 4px 10px; font-size: 12px; } .pagination-info { min-width: auto; } }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Admin Panel</h1>
+    <a href="/admin/logout">Sign Out</a>
+  </div>
+
+  <div class="container">
+    {{FLASH_MESSAGE}}
+
+    <!-- Toggle Auto-Refund -->
+    <div class="card">
+      <h2>Refund Settings</h2>
+      <div class="toggle-row">
+        <div>
+          <div class="toggle-label">Automatic refund on cancellation</div>
+          <div class="toggle-sublabel">
+            If disabled, cancellations are processed without a refund and require your approval.
+          </div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="autoRefundToggle" {{AUTO_REFUND_CHECKED}} />
+          <span class="slider"></span>
+        </label>
+      </div>
+    </div>
+
+    <!-- Allowed Order Statuses -->
+    <div class="card">
+      <h2>Allowed Statuses for Cancellation <span class="save-indicator" id="statusSaved">Saved</span></h2>
+      <p class="card-desc">
+        Only orders whose fulfillment status <strong>and</strong> financial status are among the selected options can be cancelled.
+      </p>
+
+      <h3>Fulfillment Status</h3>
+      <div class="cb-grid" id="fulfillmentGroup">
+        {{FULFILLMENT_CHECKBOXES}}
+      </div>
+
+      <hr class="divider" />
+
+      <h3>Financial Status</h3>
+      <div class="cb-grid" id="financialGroup">
+        {{FINANCIAL_CHECKBOXES}}
+      </div>
+    </div>
+
+    <!-- Pending Refunds -->
+    <div class="card">
+      <h2>Pending Refunds <span style="font-weight:400;color:#666;font-size:14px;">({{PENDING_COUNT}})</span></h2>
+      {{PENDING_TABLE}}
+      {{PENDING_PAGINATION}}
+    </div>
+
+    <!-- Recent Cancellations -->
+    <div class="card">
+      <h2>Recent Cancellations</h2>
+      {{RECENT_TABLE}}
+      {{RECENT_PAGINATION}}
+    </div>
+  </div>
+
+  <!-- CSRF token for admin actions (hidden input, read by JS) -->
+  <input type="hidden" id="adminCsrfToken" value="{{CSRF_TOKEN}}" />
+  <!-- Hidden nonce input for CSP compliance -->
+  <noscript></noscript>
+
+  <script nonce="{{NONCE}}">
+    // ─── Pagination helper ───────────────────────────────
+    function goToPage(page, tableType) {
+      const currentUrl = new URL(window.location);
+      currentUrl.searchParams.set('page', String(page));
+      window.location.href = currentUrl.toString();
+    }
+
+    // ─── Toggle auto-refund ──────────────────────────────
+    const adminCsrf = document.getElementById('adminCsrfToken').value;
+    const toggle = document.getElementById('autoRefundToggle');
+    toggle.addEventListener('change', async () => {
+      try {
+        const res = await fetch('/admin/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ auto_refund: toggle.checked, _csrf: adminCsrf }),
+        });
+        if (!res.ok) throw new Error('Failed');
+      } catch {
+        toggle.checked = !toggle.checked;
+        alert('Error changing setting. Please try again.');
+      }
+    });
+
+    // ─── Status checkboxes ───────────────────────────────
+    const savedIndicator = document.getElementById('statusSaved');
+    let saveTimeout;
+
+    function flashSaved() {
+      savedIndicator.classList.add('show');
+      clearTimeout(saveTimeout);
+      saveTimeout = setTimeout(() => savedIndicator.classList.remove('show'), 2000);
+    }
+
+    async function saveStatuses(group) {
+      const settingKey = group === 'fulfillment' ? 'allowed_fulfillment_statuses' : 'allowed_financial_statuses';
+      const container = document.getElementById(group + 'Group');
+      const checked = [...container.querySelectorAll('input[type="checkbox"]:checked')].map(cb => cb.value);
+
+      if (checked.length === 0) {
+        alert('You must select at least one status.');
+        // Re-check the one that was just unchecked
+        event.target.checked = true;
+        return;
+      }
+
+      try {
+        const res = await fetch('/admin/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key: settingKey, value: checked, _csrf: adminCsrf }),
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || 'Failed');
+        }
+        flashSaved();
+      } catch (err) {
+        alert('Error saving: ' + err.message);
+        event.target.checked = !event.target.checked;
+      }
+    }
+
+    document.getElementById('fulfillmentGroup').addEventListener('change', (e) => {
+      if (e.target.type === 'checkbox') saveStatuses('fulfillment');
+    });
+    document.getElementById('financialGroup').addEventListener('change', (e) => {
+      if (e.target.type === 'checkbox') saveStatuses('financial');
+    });
+
+    // ─── Approve / Deny buttons (with CSRF token) ─────────
+    document.querySelectorAll('[data-action]').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        const action = btn.dataset.action;
+        const id = btn.dataset.id;
+        if (action === 'approve' && !confirm('Approve the refund for this order?')) return;
+        if (action === 'deny' && !confirm('Deny the refund?')) return;
+
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = '/admin/refund/' + action;
+
+        const idInput = document.createElement('input');
+        idInput.type = 'hidden';
+        idInput.name = 'id';
+        idInput.value = id;
+        form.appendChild(idInput);
+
+        const csrfInput = document.createElement('input');
+        csrfInput.type = 'hidden';
+        csrfInput.name = '_csrf';
+        csrfInput.value = adminCsrf;
+        form.appendChild(csrfInput);
+
+        document.body.appendChild(form);
+        form.submit();
+      });
+    });
+  </script>
+</body>
+</html>
