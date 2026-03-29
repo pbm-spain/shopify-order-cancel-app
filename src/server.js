@@ -32,7 +32,11 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-app.set('trust proxy', 1);
+// Fix #43: Make trust proxy configurable. Default to disabled (safest).
+// Set TRUST_PROXY=1 when behind exactly one reverse proxy (Nginx, Cloudflare, etc.).
+// Without a trusted proxy, leaving this enabled allows X-Forwarded-For spoofing
+// which bypasses all IP-based rate limiting (login, cancel, confirm endpoints).
+app.set('trust proxy', config.trustProxy);
 
 // Log HTTPS warning if app URL is not HTTPS (Fix #14)
 if (!config.appBaseUrl.startsWith('https')) {
@@ -144,7 +148,7 @@ app.get('/health', (_req, res) => {
     const db = getDb();
     // Execute a simple query to verify database connectivity
     db.prepare('SELECT 1').get();
-    res.json({ ok: true, version: '0.8.7' });
+    res.json({ ok: true, version: '0.8.8' });
   } catch (error) {
     logger.error('Health check failed', { error: error.message });
     res.status(503).json({ ok: false, error: 'Database unavailable' });
@@ -517,8 +521,10 @@ app.get('/admin', requireAdmin, adminCsrfGenerate, (_req, res) => {
   const allowedFinancial = getAllowedFinancialStatuses();
 
   const flashType = _req.query.type === 'error' ? 'flash-error' : 'flash-success';
+  // Fix #42: Remove redundant decodeURIComponent — Express already decodes query params.
+  // The double-decode could throw URIError on malformed percent-encoded sequences.
   const flash = _req.query.msg
-    ? `<div class="flash ${flashType}">${escapeHtml(decodeURIComponent(String(_req.query.msg)))}</div>`
+    ? `<div class="flash ${flashType}">${escapeHtml(String(_req.query.msg))}</div>`
     : '';
 
   const html = template

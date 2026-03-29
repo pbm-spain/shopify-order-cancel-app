@@ -227,8 +227,11 @@ export function isOrderCancelable(order) {
   }
 
   // Check fulfillment orders for in-progress states (Fulfillment Orders API)
+  // Fix #40: SUBMITTED is not a valid FulfillmentOrderStatus enum value (2026-01).
+  // Valid blocking statuses: IN_PROGRESS (being processed), ON_HOLD (merchant hold),
+  // INCOMPLETE (cannot be completed as requested).
   const fulfillmentOrders = order.fulfillmentOrders?.edges?.map((e) => e.node) || [];
-  const blockingStatuses = ['IN_PROGRESS', 'SUBMITTED'];
+  const blockingStatuses = ['IN_PROGRESS', 'ON_HOLD', 'INCOMPLETE'];
   const hasBlockingFulfillmentOrder = fulfillmentOrders.some((fo) =>
     blockingStatuses.includes(fo.status),
   );

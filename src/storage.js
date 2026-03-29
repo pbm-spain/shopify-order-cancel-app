@@ -347,10 +347,11 @@ const countPendingRefundsStmt = db.prepare(`
   WHERE refund_status = 'pending_approval'
 `);
 
+// Fix #45: Add id tiebreaker for stable pagination when timestamps match
 const getPendingRefundsPaginatedStmt = db.prepare(`
   SELECT * FROM cancel_requests
   WHERE refund_status = 'pending_approval'
-  ORDER BY cancelled_at DESC
+  ORDER BY cancelled_at DESC, id ASC
   LIMIT ? OFFSET ?
 `);
 
@@ -368,10 +369,11 @@ const countRecentCancellationsStmt = db.prepare(`
   WHERE status IN ('cancel_submitted', 'cancelled')
 `);
 
+// Fix #45: Add id tiebreaker for stable pagination when timestamps match
 const getRecentCancellationsPaginatedStmt = db.prepare(`
   SELECT * FROM cancel_requests
   WHERE status IN ('cancel_submitted', 'cancelled')
-  ORDER BY cancelled_at DESC
+  ORDER BY cancelled_at DESC, id ASC
   LIMIT ? OFFSET ?
 `);
 
