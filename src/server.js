@@ -144,7 +144,7 @@ app.get('/health', (_req, res) => {
     const db = getDb();
     // Execute a simple query to verify database connectivity
     db.prepare('SELECT 1').get();
-    res.json({ ok: true, version: '0.8.6' });
+    res.json({ ok: true, version: '0.8.7' });
   } catch (error) {
     logger.error('Health check failed', { error: error.message });
     res.status(503).json({ ok: false, error: 'Database unavailable' });
@@ -292,10 +292,9 @@ app.get('/confirm', confirmRateLimit, async (req, res) => {
     }
 
     // Re-verify order state before cancelling
-    const order = await findOrderByEmailAndName({
-      email: record.email,
-      orderNumber: record.orderNumber,
-    });
+    // Fix #36: Use findOrderById (direct GID lookup) instead of findOrderByEmailAndName
+    // which applies status:open + lookback filters that can exclude valid orders
+    const order = await findOrderById(record.orderId);
 
     const cancelable = isOrderCancelable(order);
     if (!cancelable.ok) {
@@ -442,7 +441,8 @@ app.get('/admin/logout', adminLogout);
 const adminSessions = new Map();
 
 // Cleanup expired sessions every 10 minutes
-setInterval(() => {
+// Fix #38: Store interval reference so it can be stopped during shutdown
+const adminSessionCleanupInterval = setInterval(() => {
   try {
     const now = Date.now();
     const maxAge = 8 * 60 * 60 * 1000;
@@ -452,7 +452,8 @@ setInterval(() => {
       }
     }
   } catch { /* cleanup failure is non-fatal */ }
-}, 10 * 60 * 1000).unref();
+}, 10 * 60 * 1000);
+adminSessionCleanupInterval.unref();
 
 function adminCsrfGenerate(req, res, next) {
   // Generate CSRF token on EVERY page load (Fix #9: prevent stale tokens)
@@ -528,9 +529,9 @@ app.get('/admin', requireAdmin, adminCsrfGenerate, (_req, res) => {
     .replace('{{CSRF_TOKEN}}', res.locals.adminCsrfToken)
     .replace('{{FULFILLMENT_CHECKBOXES}}', buildStatusCheckboxes(ALL_FULFILLMENT_STATUSES, allowedFulfillment, 'fulfillment'))
     .replace('{{FINANCIAL_CHECKBOXES}}', buildStatusCheckboxes(ALL_FINANCIAL_STATUSES, allowedFinancial, 'financial'))
-    .replace('{{PENDING_TABLE}}', buildPendingTable(pendingResult.data, pendingResult))
+    .replace('{{PENDING_TABLE}}', buildPendingTable(pendingResult.data))
     .replace('{{PENDING_PAGINATION}}', buildPagination('pending', pendingResult))
-    .replace('{{RECENT_TABLE}}', buildRecentTable(recentResult.data, recentResult))
+    .replace('{{RECENT_TABLE}}', buildRecentTable(recentResult.data))
     .replace('{{RECENT_PAGINATION}}', buildPagination('recent', recentResult));
 
   res.type('html').send(html);
@@ -762,7 +763,7 @@ function buildPagination(tableType, result) {
   `;
 }
 
-function buildPendingTable(pending, result) {
+function buildPendingTable(pending) {
   if (pending.length === 0) {
     return '<p class="empty">No pending refunds awaiting approval.</p>';
   }
@@ -784,7 +785,7 @@ function buildPendingTable(pending, result) {
   </table>`;
 }
 
-function buildRecentTable(recent, result) {
+function buildRecentTable(recent) {
   if (recent.length === 0) {
     return '<p class="empty">No recent cancellations.</p>';
   }
@@ -811,6 +812,8 @@ function shutdown() {
   // Stop background workers (each manages its own interval)
   try { stopEmailQueue(); } catch (e) { logger.warn('Failed to stop email queue', { error: e.message }); }
   try { stopSessionCleanup(); } catch (e) { logger.warn('Failed to stop session cleanup', { error: e.message }); }
+  // Fix #38: Stop admin session cleanup interval
+  try { clearInterval(adminSessionCleanupInterval); } catch (e) { logger.warn('Failed to stop admin session cleanup', { error: e.message }); }
 
   // Close database
   try {

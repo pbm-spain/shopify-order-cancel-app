@@ -171,11 +171,13 @@ function lookbackDate() {
  */
 export const ALL_FULFILLMENT_STATUSES = [
   { value: 'UNFULFILLED',         label: 'Unfulfilled' },
+  { value: 'OPEN',                label: 'Open' },
   { value: 'PARTIALLY_FULFILLED', label: 'Partially Fulfilled' },
   { value: 'FULFILLED',           label: 'Fulfilled / Shipped' },
   { value: 'RESTOCKED',           label: 'Restocked' },
   { value: 'PENDING_FULFILLMENT', label: 'Pending Fulfillment' },
   { value: 'ON_HOLD',             label: 'On Hold' },
+  { value: 'REQUEST_DECLINED',    label: 'Request Declined' },
   { value: 'SCHEDULED',           label: 'Scheduled' },
   { value: 'IN_PROGRESS',         label: 'In Progress' },
 ];

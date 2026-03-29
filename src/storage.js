@@ -462,6 +462,7 @@ const checkWebhookEventStmt = db.prepare(`
 const insertWebhookEventStmt = db.prepare(`
   INSERT INTO webhook_events (webhook_id, received_at)
   VALUES (@webhookId, @receivedAt)
+  ON CONFLICT(webhook_id) DO NOTHING
 `);
 
 /**
