@@ -24,8 +24,7 @@ import {
   findRequestByTokenHash,
   updateRequest,
   findPendingRequestForOrder,
-  isWebhookProcessed,
-  markWebhookProcessed,
+  tryMarkWebhookProcessed,
   getAllowedFulfillmentStatuses,
 } from './storage.js';
 
@@ -116,15 +115,11 @@ export async function handleOrderUpdated(req, res) {
   try {
     const webhookId = req.get('X-Shopify-Webhook-Id');
 
-    // Deduplication: Check if already processed
-    if (webhookId && isWebhookProcessed(webhookId)) {
+    // Fix #46: Atomic check-and-insert deduplication (replaces TOCTTOU check-then-mark).
+    // tryMarkWebhookProcessed returns false if the webhook was already processed.
+    if (webhookId && !tryMarkWebhookProcessed(webhookId)) {
       logger.debug('Webhook already processed, skipping', { webhookId, traceId: req.traceId });
       return res.json({ ok: true });
-    }
-
-    // Fix #25: Mark webhook as processed early to prevent duplicate processing on all paths
-    if (webhookId) {
-      markWebhookProcessed(webhookId);
     }
 
     const body = JSON.parse(req.rawBody);
@@ -213,15 +208,11 @@ export async function handleOrderCancelled(req, res) {
   try {
     const webhookId = req.get('X-Shopify-Webhook-Id');
 
-    // Deduplication: Check if already processed
-    if (webhookId && isWebhookProcessed(webhookId)) {
+    // Fix #46: Atomic check-and-insert deduplication (replaces TOCTTOU check-then-mark).
+    // tryMarkWebhookProcessed returns false if the webhook was already processed.
+    if (webhookId && !tryMarkWebhookProcessed(webhookId)) {
       logger.debug('Webhook already processed, skipping', { webhookId, traceId: req.traceId });
       return res.json({ ok: true });
-    }
-
-    // Fix #25: Mark webhook as processed early to prevent duplicate processing on all paths
-    if (webhookId) {
-      markWebhookProcessed(webhookId);
     }
 
     const body = JSON.parse(req.rawBody);
@@ -291,15 +282,11 @@ export async function handleRefundCreated(req, res) {
   try {
     const webhookId = req.get('X-Shopify-Webhook-Id');
 
-    // Deduplication: Check if already processed
-    if (webhookId && isWebhookProcessed(webhookId)) {
+    // Fix #46: Atomic check-and-insert deduplication (replaces TOCTTOU check-then-mark).
+    // tryMarkWebhookProcessed returns false if the webhook was already processed.
+    if (webhookId && !tryMarkWebhookProcessed(webhookId)) {
       logger.debug('Webhook already processed, skipping', { webhookId, traceId: req.traceId });
       return res.json({ ok: true });
-    }
-
-    // Fix #25: Mark webhook as processed early to prevent duplicate processing on all paths
-    if (webhookId) {
-      markWebhookProcessed(webhookId);
     }
 
     const body = JSON.parse(req.rawBody);

@@ -486,6 +486,20 @@ export function markWebhookProcessed(webhookId) {
 }
 
 /**
+ * Atomic check-and-insert for webhook deduplication (Fix #46).
+ * Attempts to insert the webhook ID; returns true if this is a NEW webhook
+ * (insert succeeded), false if it was already processed (ON CONFLICT hit).
+ * Eliminates the TOCTTOU race between isWebhookProcessed + markWebhookProcessed.
+ */
+export function tryMarkWebhookProcessed(webhookId) {
+  const result = insertWebhookEventStmt.run({
+    webhookId,
+    receivedAt: new Date().toISOString(),
+  });
+  return result.changes === 1;
+}
+
+/**
  * Clean up webhook events older than the specified number of days (Fix #12).
  * Call this periodically to prevent the webhook_events table from growing unbounded.
  */

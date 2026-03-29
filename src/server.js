@@ -148,7 +148,7 @@ app.get('/health', (_req, res) => {
     const db = getDb();
     // Execute a simple query to verify database connectivity
     db.prepare('SELECT 1').get();
-    res.json({ ok: true, version: '0.8.8' });
+    res.json({ ok: true, version: '0.8.9' });
   } catch (error) {
     logger.error('Health check failed', { error: error.message });
     res.status(503).json({ ok: false, error: 'Database unavailable' });
@@ -460,12 +460,18 @@ const adminSessionCleanupInterval = setInterval(() => {
 adminSessionCleanupInterval.unref();
 
 function adminCsrfGenerate(req, res, next) {
-  // Generate CSRF token on EVERY page load (Fix #9: prevent stale tokens)
+  // Fix #47: Reuse existing CSRF token for the session instead of regenerating
+  // on every page load. Regenerating caused stale-token errors when admins had
+  // multiple tabs or refreshed while a form was open.
   const sessionId = req.cookies?._admin_session_id || crypto.randomBytes(16).toString('hex');
-  const csrfToken = crypto.randomBytes(32).toString('hex');
 
-  // Store new token in session store (always latest)
-  adminSessions.set(sessionId, { csrfToken, createdAt: Date.now() });
+  let session = adminSessions.get(sessionId);
+  if (!session || !session.csrfToken) {
+    // Only generate a new token when the session is new or missing a token
+    const csrfToken = crypto.randomBytes(32).toString('hex');
+    session = { csrfToken, createdAt: Date.now() };
+    adminSessions.set(sessionId, session);
+  }
 
   res.cookie('_admin_session_id', sessionId, {
     httpOnly: true,
@@ -474,7 +480,7 @@ function adminCsrfGenerate(req, res, next) {
     maxAge: 8 * 60 * 60 * 1000,
   });
 
-  res.locals.adminCsrfToken = csrfToken;
+  res.locals.adminCsrfToken = session.csrfToken;
   next();
 }
 
@@ -662,7 +668,9 @@ app.post('/admin/refund/approve', requireAdmin, adminCsrfValidate, async (req, r
       adminIp: req.ip,
       traceId: req.traceId,
     });
-    return res.redirect(`/admin?msg=Error processing refund: ${encodeURIComponent(error.message)}&type=error`);
+    // Fix #48: Use generic error message in URL to avoid leaking Shopify API internals.
+    // Detailed error is already in the structured logs above.
+    return res.redirect('/admin?msg=Error processing refund. Check server logs for details.&type=error');
   }
 });
 
@@ -709,7 +717,8 @@ app.post('/admin/refund/deny', requireAdmin, adminCsrfValidate, async (req, res)
     return res.redirect(`/admin?msg=Refund denied for order ${encodeURIComponent(record.orderNumber)}&type=success`);
   } catch (error) {
     logger.error('Refund denial failed', { id, error: error.message });
-    return res.redirect(`/admin?msg=Error denying refund: ${encodeURIComponent(error.message)}&type=error`);
+    // Fix #48: Generic error message to avoid leaking API internals in URL.
+    return res.redirect('/admin?msg=Error denying refund. Check server logs for details.&type=error');
   }
 });
 
