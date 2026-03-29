@@ -327,6 +327,31 @@ export function updateRefundById(id, patch) {
   });
 }
 
+/**
+ * Atomic refund status transition (Fix #51).
+ * Only updates if refund_status matches expectedStatus, preventing concurrent
+ * admins from approving/denying the same refund simultaneously.
+ * Returns true if the update succeeded (status matched), false otherwise.
+ */
+const atomicUpdateRefundStmt = db.prepare(`
+  UPDATE cancel_requests
+  SET refund_status = @refundStatus,
+      refunded_at = @refundedAt,
+      updated_at = @updatedAt
+  WHERE id = @id AND refund_status = @expectedStatus
+`);
+
+export function atomicUpdateRefundById(id, expectedStatus, patch) {
+  const result = atomicUpdateRefundStmt.run({
+    id,
+    expectedStatus,
+    refundStatus: patch.refundStatus,
+    refundedAt: patch.refundedAt || null,
+    updatedAt: new Date().toISOString(),
+  });
+  return result.changes === 1;
+}
+
 // ─── Recent cancellations (for admin dashboard) ─────────────────────
 
 const recentCancellationsStmt = db.prepare(`

@@ -15,7 +15,7 @@ import { createToken, hashToken, minutesFromNow, normalizeEmail, normalizeOrderN
 import {
   saveRequest, findRequestByTokenHash, updateRequest, markTokenAsUsed,
   findPendingRequestForOrder, findRequestById,
-  updateRefundById, isAutoRefundEnabled,
+  updateRefundById, atomicUpdateRefundById, isAutoRefundEnabled,
   getAllowedFulfillmentStatuses, getAllowedFinancialStatuses,
   setSetting, closeDb, getPendingRefundsPaginated, getRecentCancellationsPaginated,
   markEmailSent, getDb, cleanupOldWebhookEvents,
@@ -148,7 +148,7 @@ app.get('/health', (_req, res) => {
     const db = getDb();
     // Execute a simple query to verify database connectivity
     db.prepare('SELECT 1').get();
-    res.json({ ok: true, version: '0.8.9' });
+    res.json({ ok: true, version: '0.9.0' });
   } catch (error) {
     logger.error('Health check failed', { error: error.message });
     res.status(503).json({ ok: false, error: 'Database unavailable' });
@@ -628,6 +628,16 @@ app.post('/admin/refund/approve', requireAdmin, adminCsrfValidate, async (req, r
       return res.redirect('/admin?msg=Order is not cancelled in Shopify. Cannot refund.&type=error');
     }
 
+    // Fix #51: Atomic state transition BEFORE calling Shopify API.
+    // Only succeeds if still pending_approval, preventing concurrent double-approvals.
+    const updated = atomicUpdateRefundById(id, 'pending_approval', {
+      refundStatus: 'approved',
+      refundedAt: new Date().toISOString(),
+    });
+    if (!updated) {
+      return res.redirect('/admin?msg=This refund has already been processed by another admin&type=error');
+    }
+
     const refund = await createOrderRefund(
       record.orderId,
       'Refund approved by admin',
@@ -640,11 +650,6 @@ app.post('/admin/refund/approve', requireAdmin, adminCsrfValidate, async (req, r
       record.orderId,
       `Refund approved by admin (${new Date().toISOString()})`,
     );
-
-    updateRefundById(id, {
-      refundStatus: 'approved',
-      refundedAt: new Date().toISOString(),
-    });
 
     auditLog('refund_approved', {
       requestId: id,
@@ -697,7 +702,11 @@ app.post('/admin/refund/deny', requireAdmin, adminCsrfValidate, async (req, res)
   }
 
   try {
-    updateRefundById(id, { refundStatus: 'denied' });
+    // Fix #51: Atomic state transition — only succeeds if still pending_approval.
+    const updated = atomicUpdateRefundById(id, 'pending_approval', { refundStatus: 'denied' });
+    if (!updated) {
+      return res.redirect('/admin?msg=This refund has already been processed by another admin&type=error');
+    }
 
     // Update Shopify order: remove pending tag, update note
     await removeTagsFromOrder(record.orderId, ['refund-pending']);
@@ -829,15 +838,27 @@ function shutdown() {
   try { stopSessionCleanup(); } catch (e) { logger.warn('Failed to stop session cleanup', { error: e.message }); }
   // Fix #38: Stop admin session cleanup interval
   try { clearInterval(adminSessionCleanupInterval); } catch (e) { logger.warn('Failed to stop admin session cleanup', { error: e.message }); }
+  // Fix #49: Stop webhook cleanup interval
+  try { clearInterval(webhookCleanupInterval); } catch (e) { logger.warn('Failed to stop webhook cleanup', { error: e.message }); }
 
-  // Close database
-  try {
-    closeDb();
-  } catch (error) {
-    logger.error('Error closing database', { error: error.message });
-  }
+  // Fix #50: Stop accepting new connections, wait for in-flight requests to finish,
+  // then close the database. Force-exit after 10 seconds to prevent hanging.
+  const forceExitTimeout = setTimeout(() => {
+    logger.warn('Graceful shutdown timed out, forcing exit');
+    process.exit(1);
+  }, 10_000);
+  forceExitTimeout.unref();
 
-  process.exit(0);
+  server.close(() => {
+    logger.info('HTTP server closed, all in-flight requests completed');
+    // Close database only after all requests have finished
+    try {
+      closeDb();
+    } catch (error) {
+      logger.error('Error closing database', { error: error.message });
+    }
+    process.exit(0);
+  });
 }
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
@@ -854,18 +875,20 @@ try {
   logger.warn('Initial webhook cleanup failed', { error: error.message });
 }
 
-// Schedule webhook cleanup every 24 hours
-setInterval(() => {
+// Fix #49: Store webhook cleanup interval so it can be cleared in shutdown.
+const webhookCleanupInterval = setInterval(() => {
   try {
     cleanupOldWebhookEvents(30);
   } catch (error) {
     logger.error('Scheduled webhook cleanup failed', { error: error.message });
   }
-}, 24 * 60 * 60 * 1000).unref();
+}, 24 * 60 * 60 * 1000);
+webhookCleanupInterval.unref();
 
 // Start background workers
 startSessionCleanup();
 
-app.listen(config.port, () => {
+// Fix #50: Store server instance for graceful shutdown of in-flight requests.
+const server = app.listen(config.port, () => {
   logger.info('Server started', { port: config.port, apiVersion: config.apiVersion });
 });
