@@ -12,7 +12,7 @@ RUN npm ci --omit=dev
 # ── Stage 2: Production image ────────────────────────────────────────
 FROM node:20-alpine AS production
 
-# Security: install curl for healthcheck and sqlite3 for backup scripts, then create non-root user
+# Install runtime tools: curl (healthcheck), sqlite (provides sqlite3 CLI for backups & DB inspection)
 RUN apk add --no-cache curl sqlite \
     && addgroup -g 1001 -S appgroup \
     && adduser -u 1001 -S appuser -G appgroup
@@ -23,9 +23,10 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/package.json ./package.json
 
-# Copy application source
+# Copy application source and operational scripts
 COPY src/ ./src/
 COPY views/ ./views/
+COPY scripts/ ./scripts/
 
 # Create data directory with correct permissions
 RUN mkdir -p /app/data && chown -R appuser:appgroup /app/data

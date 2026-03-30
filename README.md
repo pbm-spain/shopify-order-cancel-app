@@ -5,7 +5,116 @@
 
 A self-hosted Shopify app that lets customers request order cancellations through a secure, email-confirmed workflow. The store owner retains full control over refund approvals via a built-in admin dashboard.
 
-## How It Works
+---
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Prerequisites](#prerequisites)
+- [Shopify Setup (from Scratch)](#shopify-setup-from-scratch)
+  - [1. Create a Shopify Partner Account](#1-create-a-shopify-partner-account)
+  - [2. Create a Custom App](#2-create-a-custom-app)
+  - [3. Configure API Scopes](#3-configure-api-scopes)
+  - [4. Get Your API Credentials](#4-get-your-api-credentials)
+  - [5. Configure the App Proxy](#5-configure-the-app-proxy)
+  - [6. Register Webhooks](#6-register-webhooks)
+  - [7. Configure Admin Link Extension](#7-configure-admin-link-extension)
+  - [8. Install the App on Your Store](#8-install-the-app-on-your-store)
+  - [9. Link the Form in Your Storefront](#9-link-the-form-in-your-storefront)
+- [Environment Variables](#environment-variables)
+  - [Required Variables](#required-variables)
+  - [Optional Variables](#optional-variables)
+- [Installation and Running](#installation-and-running)
+  - [With Docker (Recommended)](#with-docker-recommended)
+  - [Without Docker (Development)](#without-docker-development)
+- [API Endpoints Reference](#api-endpoints-reference)
+  - [Health Check](#health-check)
+  - [Customer-Facing Endpoints](#customer-facing-endpoints)
+  - [Webhook Endpoints](#webhook-endpoints)
+  - [Admin Endpoints](#admin-endpoints)
+- [Admin Dashboard](#admin-dashboard)
+- [Database](#database)
+  - [Tables](#tables)
+  - [Storage Location](#storage-location)
+  - [Backup Strategy](#backup-strategy)
+- [Docker Operations](#docker-operations)
+  - [Running Backups](#running-backups)
+  - [Inspecting the Database](#inspecting-the-database)
+  - [Viewing Logs](#viewing-logs)
+  - [Health Check](#health-check-1)
+  - [Using the Backup Script](#using-the-backup-script)
+  - [Accessing a Shell Inside the Container](#accessing-a-shell-inside-the-container)
+  - [Updating the Application](#updating-the-application)
+- [Testing](#testing)
+  - [Running Automated Tests](#running-automated-tests)
+  - [Test Suites](#test-suites)
+- [CI/CD](#cicd)
+  - [CI Pipeline](#ci-pipeline)
+  - [Docker Publish Pipeline](#docker-publish-pipeline)
+- [Security](#security)
+  - [Authentication and Authorization](#authentication-and-authorization)
+  - [CSRF Protection](#csrf-protection)
+  - [Rate Limiting](#rate-limiting)
+  - [Token Security](#token-security)
+  - [HTTP Security Headers](#http-security-headers)
+  - [Additional Protections](#additional-protections)
+- [Troubleshooting](#troubleshooting)
+- [License](#license)
+
+---
+
+## Overview
+
+This application provides a complete order cancellation workflow for Shopify stores. Customers fill out a form, receive a confirmation email with a time-limited link, and upon confirmation, the order is cancelled in Shopify. The store owner can choose between automatic refunds or manual approval through an admin dashboard.
+
+### Architecture
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                      SHOPIFY STOREFRONT                         │
+│                                                                  │
+│  Customer visits /apps/order-cancel/cancel-order                 │
+│         │                                                        │
+│         ▼  (App Proxy with HMAC signature)                       │
+└─────────┬────────────────────────────────────────────────────────┘
+          │
+          ▼
+┌──────────────────────────────────────────────────────────────────┐
+│                    YOUR SERVER (Docker)                           │
+│                                                                  │
+│  ┌─────────────┐  ┌──────────────┐  ┌────────────────────────┐  │
+│  │  Express     │  │  SQLite DB   │  │  Background Workers    │  │
+│  │  App         │  │  (WAL mode)  │  │  - Email retry queue   │  │
+│  │             │  │              │  │  - Webhook cleanup     │  │
+│  │  Routes:    │  │  Tables:     │  │  - Session cleanup     │  │
+│  │  /proxy/*   │  │  cancel_req  │  │                        │  │
+│  │  /confirm   │  │  admin_sets  │  └────────────────────────┘  │
+│  │  /webhooks/*│  │  webhook_evt │                               │
+│  │  /admin/*   │  │              │  ┌────────────────────────┐  │
+│  │  /health    │  │  File:       │  │  Nodemailer            │  │
+│  │             │  │  /app/data/  │  │  (SMTP transport)      │  │
+│  │             │  │  cancel-     │  │                        │  │
+│  │             │  │  requests.db │  └────────────────────────┘  │
+│  └─────────────┘  └──────────────┘                               │
+└──────────┬───────────────────────────────────────────────────────┘
+           │
+           ▼  (GraphQL API)
+┌──────────────────────────────────────────────────────────────────┐
+│                    SHOPIFY ADMIN API                              │
+│                                                                  │
+│  - Order lookup (fulfillment status, financial status)           │
+│  - orderCancel mutation (async Job)                              │
+│  - refundCreate mutation (with idempotency key)                  │
+│  - tagsAdd / tagsRemove (refund-pending tag)                     │
+│                                                                  │
+│  Webhooks (push to your server):                                 │
+│  - orders/updated     → auto-deny if order ships                 │
+│  - orders/cancelled   → mark as cancelled_externally             │
+│  - refunds/create     → mark pending refund as approved          │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+### How It Works
 
 ```
 Customer fills form ─► HMAC verified ─► Email with confirmation link
@@ -33,162 +142,39 @@ Customer fills form ─► HMAC verified ─► Email with confirmation link
 - Shopify webhook integration for real-time order status sync
 - Background email retry queue with exponential backoff
 - Production-hardened security (HMAC, CSRF, rate limiting, CSP, timing-safe comparisons)
-
----
-
-## Table of Contents
-
-- [Prerequisites](#prerequisites)
-- [Installation from Scratch](#installation-from-scratch)
-  - [1. Clone the Repository](#1-clone-the-repository)
-  - [2. Install Node.js Dependencies](#2-install-nodejs-dependencies)
-  - [3. Configure Environment Variables](#3-configure-environment-variables)
-  - [4. Start the Application](#4-start-the-application)
-- [Shopify Partner Dashboard Setup](#shopify-partner-dashboard-setup)
-  - [Step 1: Create a Shopify Partner Account](#step-1-create-a-shopify-partner-account)
-  - [Step 2: Create a Custom App](#step-2-create-a-custom-app)
-  - [Step 3: Configure API Scopes](#step-3-configure-api-scopes)
-  - [Step 4: Get Your API Credentials](#step-4-get-your-api-credentials)
-  - [Step 5: Configure the App Proxy](#step-5-configure-the-app-proxy)
-  - [Step 6: Register Webhooks](#step-6-register-webhooks)
-  - [Step 7: Install the App on Your Store](#step-7-install-the-app-on-your-store)
-  - [Step 8: Link the Form in Your Storefront](#step-8-link-the-form-in-your-storefront)
-- [Environment Variables Reference](#environment-variables-reference)
-  - [Required Variables](#required-variables)
-  - [Optional Variables](#optional-variables)
-- [Architecture](#architecture)
-  - [Project Structure](#project-structure)
-  - [Tech Stack](#tech-stack)
-  - [Database](#database)
-  - [Data Flow](#data-flow)
-  - [Key Design Decisions](#key-design-decisions)
-- [API Endpoints Reference](#api-endpoints-reference)
-  - [Customer-Facing Endpoints](#customer-facing-endpoints)
-  - [Webhook Endpoints](#webhook-endpoints)
-  - [Admin Endpoints](#admin-endpoints)
-- [Admin Dashboard](#admin-dashboard)
-- [Webhooks](#webhooks)
-  - [Webhook Topics and Behavior](#webhook-topics-and-behavior)
-  - [HMAC Verification](#hmac-verification)
-  - [Deduplication and Idempotency](#deduplication-and-idempotency)
-- [Email Configuration](#email-configuration)
-- [Security](#security)
-- [Testing](#testing)
-  - [Running Automated Tests](#running-automated-tests)
-  - [Manual Testing Flow](#manual-testing-flow)
-  - [CI Pipeline](#ci-pipeline)
-- [Deployment](#deployment)
-  - [Docker (Recommended)](#docker-recommended)
-  - [Railway / Render / Fly.io](#railway--render--flyio)
-  - [VPS with Nginx](#vps-with-nginx)
-  - [Process Management (systemd)](#process-management-systemd)
-  - [Persistent Storage](#persistent-storage)
-  - [Database Backups](#database-backups)
-  - [Error Monitoring](#error-monitoring)
-  - [Graceful Shutdown](#graceful-shutdown)
-- [Monitoring & Logging](#monitoring--logging)
-- [Troubleshooting](#troubleshooting)
-- [License](#license)
+- Self-contained Docker image with SQLite, backup tools, and health checks
 
 ---
 
 ## Prerequisites
 
-Before you begin, make sure you have the following:
-
 | Requirement | Details |
 |---|---|
-| **Node.js** | Version 20 or later (tested on 20 and 22). Download from [nodejs.org](https://nodejs.org/) |
-| **npm** | Comes bundled with Node.js. Version 10+ recommended |
-| **Git** | For cloning the repository |
+| **Docker and Docker Compose** | Required for the recommended deployment method. Install from [docs.docker.com](https://docs.docker.com/get-docker/) |
 | **Shopify Partner Account** | Free at [partners.shopify.com](https://partners.shopify.com/) |
-| **A Shopify Store** | Development or production store where you'll install the app |
+| **A Shopify Store** | Development or production store where you will install the app |
 | **SMTP Provider** | Any provider that supports SMTP: [Resend](https://resend.com/), Mailgun, SendGrid, Amazon SES, Gmail SMTP, etc. |
 | **HTTPS Endpoint** | Required by Shopify for App Proxy and webhooks. Use a reverse proxy (Nginx, Caddy) with Let's Encrypt, or a platform like Railway/Render that provides HTTPS automatically |
 | **A domain or public URL** | Your app must be reachable from the internet for Shopify to communicate with it |
 
-Optional:
-- **Docker** (for containerized deployment)
-- **SQLite CLI** (`sqlite3`) for manual database inspection during development
+For development without Docker:
+- **Node.js** version 20 or later (tested on 20 and 22). Download from [nodejs.org](https://nodejs.org/)
+- **npm** (bundled with Node.js, version 10+ recommended)
+- **Git** for cloning the repository
 
 ---
 
-## Installation from Scratch
+## Shopify Setup (from Scratch)
 
-### 1. Clone the Repository
+This section walks you through the complete Shopify configuration from zero. Complete all steps before running the app.
 
-```bash
-git clone https://github.com/pbm-spain/shopify-order-cancel-app.git
-cd shopify-order-cancel-app
-```
-
-### 2. Install Node.js Dependencies
-
-```bash
-npm ci
-```
-
-This installs all production and development dependencies, including:
-
-| Package | Purpose |
-|---|---|
-| `express` | HTTP server and routing |
-| `better-sqlite3` | SQLite database driver (native module, compiled on install) |
-| `nodemailer` | SMTP email sending |
-| `dotenv` | Environment variable loading from `.env` |
-| `cookie-parser` | Cookie parsing for sessions and CSRF |
-| `morgan` | HTTP request logging |
-
-> **Note:** `better-sqlite3` is a native C++ addon. On Linux, you may need `python3`, `make`, and `g++` installed. On macOS, Xcode Command Line Tools are required (`xcode-select --install`). On Docker/Alpine, the Dockerfile handles this automatically.
-
-### 3. Configure Environment Variables
-
-```bash
-# Copy the example file
-cp .env.example .env
-
-# Generate a secure admin token (64-character hex string)
-openssl rand -hex 32
-```
-
-Open `.env` in your editor and fill in all required values. See the [Environment Variables Reference](#environment-variables-reference) section for a complete description of each variable. At a minimum, you need:
-
-1. Your Shopify API credentials (`SHOPIFY_ADMIN_ACCESS_TOKEN`, `SHOPIFY_STORE_DOMAIN`)
-2. Your app's public URL (`APP_BASE_URL`)
-3. Shopify security secrets (`SHOPIFY_APP_PROXY_SHARED_SECRET`, `SHOPIFY_WEBHOOK_SECRET`)
-4. SMTP email settings (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `EMAIL_FROM`)
-5. Admin dashboard token (`ADMIN_API_TOKEN`) — paste the output from `openssl rand -hex 32`
-
-### 4. Start the Application
-
-```bash
-# Production mode
-npm start
-
-# Development mode (auto-restarts on file changes)
-npm run dev
-```
-
-The server starts on `http://localhost:3000` by default. Verify it's running:
-
-```bash
-curl http://localhost:3000/health
-# Expected: {"ok":true,"version":"0.12.0"}
-```
-
----
-
-## Shopify Partner Dashboard Setup
-
-This section walks you through the complete Shopify configuration, step by step.
-
-### Step 1: Create a Shopify Partner Account
+### 1. Create a Shopify Partner Account
 
 1. Go to [partners.shopify.com](https://partners.shopify.com/)
 2. Sign up for a free Partner account (or log in if you already have one)
-3. Once logged in, you'll land on the Partner Dashboard
+3. Once logged in, you land on the Partner Dashboard
 
-### Step 2: Create a Custom App
+### 2. Create a Custom App
 
 1. In the Partner Dashboard, go to **Apps** in the left sidebar
 2. Click **Create app**
@@ -196,7 +182,7 @@ This section walks you through the complete Shopify configuration, step by step.
 4. Fill in:
    - **App name**: e.g., `Order Cancel Confirmation`
    - **App URL**: Your public HTTPS URL (e.g., `https://cancel.mystore.com`)
-   - **Allowed redirection URL(s)**: Add your callback URLs:
+   - **Allowed redirection URL(s)**:
      ```
      https://cancel.mystore.com/auth/callback
      https://cancel.mystore.com/auth/shopify/callback
@@ -204,15 +190,7 @@ This section walks you through the complete Shopify configuration, step by step.
      ```
 5. Click **Create app**
 
-After creation, you can also configure the `shopify.app.toml` file locally:
-
-```bash
-cp shopify.app.toml.example shopify.app.toml
-```
-
-Edit `shopify.app.toml` and replace `YOUR_APP_CLIENT_ID` with your app's Client ID from the Partner Dashboard.
-
-### Step 3: Configure API Scopes
+### 3. Configure API Scopes
 
 In your app's settings page (Partner Dashboard > Apps > Your App > Configuration):
 
@@ -226,21 +204,22 @@ These scopes allow the app to:
 - **`read_orders`**: Look up order details (customer email, fulfillment status, financial status)
 - **`write_orders`**: Cancel orders, create refunds, add/remove tags
 
-### Step 4: Get Your API Credentials
+### 4. Get Your API Credentials
 
-After installing the app on your store (Step 7), you'll be able to access the API credentials.
+After installing the app on your store (Step 8), you can access the API credentials.
 
 1. Go to **your Shopify store admin** > **Settings** > **Apps and sales channels** > **Develop apps** (or find your installed custom app)
 2. Under **API credentials**, note the following:
    - **Admin API access token** (`shpat_...`): This is your `SHOPIFY_ADMIN_ACCESS_TOKEN`
+   - **API key**: This is your `SHOPIFY_API_KEY`
    - **API secret key**: This is used for `SHOPIFY_WEBHOOK_SECRET`
 
-Alternatively, if you're using the Partner Dashboard approach:
+Alternatively, if you are using the Partner Dashboard approach:
 1. Go to **Apps** > **Your App** > **Client credentials**
 2. Copy the **Client secret** — this will serve as your `SHOPIFY_APP_PROXY_SHARED_SECRET`
 3. The webhook signing secret is separate — see Step 6
 
-### Step 5: Configure the App Proxy
+### 5. Configure the App Proxy
 
 The App Proxy allows customers to access the cancellation form through your Shopify storefront URL (e.g., `https://your-store.myshopify.com/apps/order-cancel/cancel-order`), with Shopify handling HMAC signature verification.
 
@@ -265,9 +244,9 @@ When a customer visits `https://your-store.myshopify.com/apps/order-cancel/cance
 - Shopify appends query parameters: `shop`, `path_prefix`, `timestamp`, `signature`
 - The app sorts all parameters alphabetically (excluding `signature`), concatenates them, and computes HMAC-SHA256 using the shared secret
 - Timing-safe comparison prevents timing attacks
-- Array values in parameters are joined with commas per Shopify spec
+- Requests are also validated against a 5-minute timestamp window to prevent replay attacks
 
-### Step 6: Register Webhooks
+### 6. Register Webhooks
 
 Webhooks keep your app in sync when orders are modified outside the app (e.g., from the Shopify admin panel, another app, or the Shopify API).
 
@@ -292,7 +271,18 @@ Webhooks keep your app in sync when orders are modified outside the app (e.g., f
 | `orders/cancelled` | If an order is cancelled externally (e.g., from Shopify admin), the pending request is marked `cancelled_externally` |
 | `refunds/create` | If a refund is created externally (e.g., from Shopify admin), the pending refund is marked as approved |
 
-### Step 7: Install the App on Your Store
+**HMAC verification:** Every incoming webhook is verified with HMAC-SHA256 using your `SHOPIFY_WEBHOOK_SECRET`. The raw request body is hashed and compared (timing-safe) against the `X-Shopify-Hmac-Sha256` header. Invalid signatures are rejected with `401 Unauthorized`.
+
+**Deduplication:** Shopify may deliver the same webhook multiple times. The app tracks each `X-Shopify-Webhook-Id` in the database. Duplicate deliveries are silently ignored via `INSERT ... ON CONFLICT DO NOTHING`. Old webhook events (>30 days) are automatically cleaned up by a background worker.
+
+### 7. Configure Admin Link Extension
+
+Optionally, you can add a link in the Shopify admin order detail page that links to your app's admin dashboard.
+
+1. In the Partner Dashboard, go to **Apps** > **Your App** > **Extensions**
+2. Create an **Admin link** extension pointing to your admin dashboard URL
+
+### 8. Install the App on Your Store
 
 1. In the Partner Dashboard, go to **Apps** > **Your App**
 2. Click **Select store** or use the distribution link
@@ -300,7 +290,7 @@ Webhooks keep your app in sync when orders are modified outside the app (e.g., f
 4. Review the permissions (read/write orders) and click **Install app**
 5. After installation, the Admin API access token becomes available
 
-### Step 8: Link the Form in Your Storefront
+### 9. Link the Form in Your Storefront
 
 Add a link to the cancellation form in your store's theme. The URL path depends on your App Proxy configuration.
 
@@ -328,15 +318,19 @@ This pre-fills the customer's email and order number in the cancellation form, r
 
 ---
 
-## Environment Variables Reference
+## Environment Variables
 
-All configuration is done via environment variables, loaded from a `.env` file. Copy `.env.example` to `.env` as a starting point.
+All configuration is done via environment variables, loaded from a `.env` file. Copy `.env.example` to `.env` as a starting point:
+
+```bash
+cp .env.example .env
+```
 
 ### Required Variables
 
 | Variable | Description | Example |
 |---|---|---|
-| `APP_BASE_URL` | The public HTTPS URL where your app is hosted. Used for generating confirmation email links. Must be a valid URL with protocol. | `https://cancel.mystore.com` |
+| `APP_BASE_URL` | The public HTTPS URL where your app is hosted. Used for generating confirmation email links. Must include the protocol (`https://`). | `https://cancel.mystore.com` |
 | `SHOPIFY_STORE_DOMAIN` | Your store's `.myshopify.com` domain. Used to construct Shopify Admin API URLs. Do not include `https://`. | `my-store.myshopify.com` |
 | `SHOPIFY_ADMIN_ACCESS_TOKEN` | Admin API access token from your installed Shopify app. Starts with `shpat_`. Used for all Shopify GraphQL API calls (order lookups, cancellations, refunds, tagging). | `shpat_xxxxxxxxxxxxxxxxxxxx` |
 | `SHOPIFY_APP_PROXY_SHARED_SECRET` | The shared secret from your App Proxy configuration in the Partner Dashboard. Used to verify that incoming requests to `/proxy/*` genuinely come from Shopify. | (from Shopify Partners) |
@@ -346,7 +340,9 @@ All configuration is done via environment variables, loaded from a `.env` file. 
 | `SMTP_USER` | Username for SMTP authentication. | `resend` |
 | `SMTP_PASS` | Password or API key for SMTP authentication. | `re_xxxxxxxxxxxx` |
 | `EMAIL_FROM` | The "From" address for cancellation confirmation emails. Can include a display name. Must be a verified sender with your SMTP provider. | `My Store <no-reply@mystore.com>` |
-| `ADMIN_API_TOKEN` | Secret token for accessing the admin dashboard. Used for both browser login and Bearer token API authentication. Generate with `openssl rand -hex 32`. Must be at least 16 characters. | (use `openssl rand -hex 32`) |
+| `ADMIN_API_TOKEN` | Secret token for accessing the admin dashboard. Used for both browser login and Bearer token API authentication. Generate with `openssl rand -hex 32`. Must be at least 16 characters. This token is hashed at startup — even a memory dump will not expose the raw value. | (use `openssl rand -hex 32`) |
+
+> **Note on `ADMIN_API_TOKEN`:** This is the token you use to log in to the admin dashboard at `/admin`. It is NOT the same as `SHOPIFY_ADMIN_ACCESS_TOKEN`. The Shopify token talks to the Shopify API; the admin token protects your app's own dashboard.
 
 ### Optional Variables
 
@@ -354,6 +350,7 @@ All configuration is done via environment variables, loaded from a `.env` file. 
 |---|---|---|
 | `PORT` | `3000` | Port the HTTP server listens on. Must be 1-65535. |
 | `SHOPIFY_ADMIN_API_VERSION` | `2026-01` | Shopify Admin API version string. Only change this if you need a specific API version. |
+| `SHOPIFY_API_KEY` | (none) | Your app's API key from the Partner Dashboard. Currently used only for identification purposes. |
 | `SMTP_SECURE` | `true` | Whether to use TLS for the SMTP connection. Set to `false` for STARTTLS on port 587 or unencrypted on port 25. |
 | `CANCEL_TOKEN_TTL_MINUTES` | `30` | How long (in minutes) the confirmation link in the email remains valid. After this time, the customer must submit a new request. |
 | `CANCEL_NOTIFY_CUSTOMER` | `true` | Whether Shopify sends its own cancellation notification email to the customer (in addition to your app's email). Set to `false` to suppress Shopify's email. |
@@ -363,142 +360,215 @@ All configuration is done via environment variables, loaded from a `.env` file. 
 | `RATE_LIMIT_WINDOW_MS` | `60000` | Time window (in milliseconds) for the cancellation request rate limiter. |
 | `RATE_LIMIT_MAX_REQUESTS` | `5` | Maximum number of cancellation requests allowed per IP address within the rate limit window. |
 | `LOG_LEVEL` | `info` | Log verbosity. Options: `debug`, `info`, `warn`, `error`. The `audit` level is always logged regardless of this setting. |
-| `DATA_DIR` | `./data` | Directory where the SQLite database file (`cancel-requests.db`) is stored. Must be writable by the app process. Use an absolute path in production. |
+| `DATA_DIR` | `./data` | Directory where the SQLite database file (`cancel-requests.db`) is stored. Must be writable by the app process. In Docker, this defaults to `/app/data`. |
 | `TRUST_PROXY` | `0` (disabled) | Set to `1` when running behind exactly one reverse proxy (Nginx, Caddy, Cloudflare). This tells Express to trust the `X-Forwarded-For` header for client IP detection, which is critical for rate limiting. Without this, all requests appear to come from the proxy's IP. **Do not enable if the app is directly exposed to the internet.** |
-| `SENTRY_DSN` | (none) | Optional Sentry DSN for error monitoring. Requires installing `@sentry/node` (`npm install @sentry/node`). |
+| `SENTRY_DSN` | (none) | Optional Sentry DSN for error monitoring. Requires installing `@sentry/node`. |
 | `SENTRY_TRACES_SAMPLE_RATE` | `0.1` | Sentry performance monitoring sample rate (0.0 to 1.0). |
-| `BACKUP_DIR` | `./data/backups` | Directory for database backup files (used by `scripts/backup-db.sh`). |
+| `BACKUP_DIR` | `${DATA_DIR}/backups` | Directory for database backup files (used by `scripts/backup-db.sh`). |
 | `BACKUP_RETENTION_DAYS` | `30` | Number of days to retain database backups before auto-cleanup. |
 
 ---
 
-## Architecture
+## Installation and Running
 
-### Project Structure
+### With Docker (Recommended)
 
-```
-shopify-order-cancel-app/
-├── src/
-│   ├── server.js        # Entry point: HTTP server, background workers, graceful shutdown
-│   ├── app.js           # Express app: routes, middleware, request handling
-│   ├── config.js        # Environment variable loading with typed validation
-│   ├── shopify.js       # Shopify Admin GraphQL API client (queries + mutations)
-│   ├── storage.js       # SQLite database layer (better-sqlite3, WAL mode)
-│   ├── appProxy.js      # Shopify App Proxy HMAC-SHA256 signature verification
-│   ├── adminAuth.js     # Admin session auth, IP binding, CSRF tokens
-│   ├── csrf.js          # CSRF protection for customer forms (double-submit cookies)
-│   ├── email.js         # Nodemailer transport + confirmation email HTML template
-│   ├── emailQueue.js    # Background email retry worker (exponential backoff, 5 retries)
-│   ├── errorHandler.js  # Pluggable error monitoring (Sentry-ready, structured logging)
-│   ├── rateLimit.js     # In-memory sliding window rate limiter (per IP and per email)
-│   ├── logger.js        # Structured JSON logging + audit trail
-│   ├── utils.js         # Token generation, SHA-256 hashing, input normalization
-│   ├── views.js         # HTML rendering helpers (tables, badges, pagination)
-│   └── webhooks.js      # Shopify webhook handlers (HMAC verification + event processing)
-├── views/
-│   ├── form.html        # Customer cancellation request form
-│   ├── admin.html       # Admin dashboard (settings, pending refunds, history)
-│   ├── success.html     # Cancellation confirmed page
-│   └── request-sent.html # "Check your email" confirmation page
-├── scripts/
-│   └── backup-db.sh     # SQLite hot backup with compression and retention
-├── tests/
-│   ├── setup.js         # Test environment variables
-│   ├── helpers.js       # HMAC generators, Shopify GraphQL mock fixtures
-│   ├── cancel-flow.test.js    # Cancellation flow tests (P0/P1)
-│   ├── refund-flow.test.js    # Refund approval/denial tests (P0/P1)
-│   ├── admin-auth.test.js     # Admin authentication tests (P0/P1)
-│   ├── webhook-hmac.test.js   # Webhook signature and dedup tests (P0/P1)
-│   ├── views.test.js          # HTML rendering helpers tests (P2)
-│   ├── error-handler.test.js  # Error monitoring tests (P2)
-│   └── edge-cases.test.js     # Edge cases and storage atomicity tests (P2)
-├── .github/workflows/
-│   ├── ci.yml           # CI pipeline: lint, audit, test (Node 20/22)
-│   └── docker-publish.yml # Multi-arch Docker build + push to GHCR
-├── shopify.app.toml.example # Shopify app configuration template
-├── Dockerfile           # Multi-stage production build (Node 20 Alpine)
-├── docker-compose.yml   # Production + dev (with Mailpit SMTP) compose config
-├── .env.example         # Environment variable template
-└── package.json         # Dependencies and scripts
+Docker is the recommended way to run this application. The Docker image includes everything needed to operate the app: Node.js runtime, SQLite CLI (`sqlite3`) for database inspection and backups, `curl` for health checks, and the backup script.
+
+#### 1. Clone the Repository
+
+```bash
+git clone https://github.com/pbm-spain/shopify-order-cancel-app.git
+cd shopify-order-cancel-app
 ```
 
-### Tech Stack
+#### 2. Configure Environment Variables
 
-| Component | Technology |
-|---|---|
-| Runtime | Node.js 20+ (ES modules) |
-| Web framework | Express 4.x |
-| Database | SQLite via better-sqlite3 (WAL mode) |
-| Email | Nodemailer 8.x |
-| Shopify API | Admin GraphQL API (2026-01) |
-| Testing | Vitest 4.x + supertest + MSW |
-| CI/CD | GitHub Actions (Node 20/22 matrix, ESLint, npm audit, Vitest) |
-| Container | Docker (Node 20 Alpine, multi-stage, multi-arch) |
+```bash
+# Copy the example file
+cp .env.example .env
 
-### Database
+# Generate a secure admin token
+openssl rand -hex 32
+```
 
-The app uses a single SQLite database stored at `DATA_DIR/cancel-requests.db`. The database runs in WAL (Write-Ahead Logging) mode for concurrent read/write access, with a 5-second busy timeout.
+Open `.env` in your editor and fill in all required values (see [Environment Variables](#environment-variables)). At a minimum, you need:
 
-**Tables:**
+1. Your Shopify API credentials (`SHOPIFY_ADMIN_ACCESS_TOKEN`, `SHOPIFY_STORE_DOMAIN`)
+2. Your app's public URL (`APP_BASE_URL`)
+3. Shopify security secrets (`SHOPIFY_APP_PROXY_SHARED_SECRET`, `SHOPIFY_WEBHOOK_SECRET`)
+4. SMTP email settings (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `EMAIL_FROM`)
+5. Admin dashboard token (`ADMIN_API_TOKEN`) — paste the output from `openssl rand -hex 32`
 
-| Table | Purpose | Key Columns |
-|---|---|---|
-| `cancel_requests` | Stores every cancellation request | `id` (UUID), `order_id` (GraphQL GID), `email`, `token_hash` (SHA-256), `status` (pending/cancelled/denied/error/cancelled_externally), `refund_status` (none/automatic/pending/approved/denied/error), `used_at`, `created_at` |
-| `admin_settings` | Key-value store for admin-configurable settings | `key`, `value`, `updated_at` |
-| `webhook_events` | Webhook deduplication log | `webhook_id` (PRIMARY KEY), `received_at` |
+#### 3. Build and Start
 
-The database is created automatically on first startup. All tables and indexes are created via `CREATE TABLE IF NOT EXISTS` statements.
+```bash
+# Build and run in the background
+docker compose up -d --build
 
-### Data Flow
+# Check that the container is running
+docker ps
 
-1. **Request phase:** Customer submits the cancellation form → App Proxy HMAC signature is verified → Order is looked up via Shopify GraphQL API → Eligibility is checked (fulfillment status, financial status, age) → A 256-bit random token is generated → Token is SHA-256 hashed and stored in the database → Confirmation email is sent with the raw token in the link
-2. **Confirmation phase:** Customer clicks the link → Token is validated against the hash in the database → Order is re-verified with Shopify (still exists, still cancelable) → `orderCancel` mutation is sent to Shopify (returns an async Job) → Database record is updated
-3. **Refund phase (if auto-refund is OFF):** Order is tagged `refund-pending` in Shopify → Admin sees it in the dashboard → Admin approves or denies → On approval: refund is created via `refundCreate` GraphQL mutation with an idempotency key → `refund-pending` tag is removed
+# Verify the app is healthy
+docker exec shopify-cancel-app curl -f http://localhost:3000/health
+```
 
-### Key Design Decisions
+The app starts on port 3000 by default. The container is named `shopify-cancel-app` for easy reference in `docker exec` commands.
 
-- **Async cancellation:** Shopify's `orderCancel` mutation returns a Job ID, not an immediate result. The app relies on the `orders/cancelled` webhook to detect completion rather than polling the Job.
-- **Token hashing:** Confirmation tokens are stored as SHA-256 hashes in the database. The raw token only exists in the email link and in memory during generation. This means even a database breach doesn't expose usable tokens.
-- **Atomic operations:** Token usage and refund approvals use SQL `WHERE ... IS NULL` / `WHERE ... = expected_status` patterns to prevent race conditions (double-clicks, concurrent requests).
-- **Idempotent refunds:** The `refundCreate` mutation uses a deterministic idempotency key derived from the request ID, preventing duplicate refunds.
-- **Webhook deduplication:** Each webhook event is tracked by its `X-Shopify-Webhook-Id` header. Duplicate deliveries are silently ignored via `INSERT ... ON CONFLICT DO NOTHING`.
-- **REST-to-GraphQL ID translation:** Webhooks deliver REST API payloads with numeric order IDs, but the database stores GraphQL GIDs (`gid://shopify/Order/{id}`). The app translates between formats automatically.
+#### 4. Verify
+
+```bash
+curl http://localhost:3000/health
+# Expected: {"ok":true,"version":"0.12.0"}
+```
+
+#### Volume Mounts
+
+The `docker-compose.yml` creates a Docker named volume `app-data` mounted at `/app/data` inside the container. This volume persists:
+
+- The SQLite database (`cancel-requests.db`)
+- WAL files (`cancel-requests.db-wal`, `cancel-requests.db-shm`)
+- Database backups (in the `backups/` subdirectory)
+
+The volume survives container rebuilds, restarts, and upgrades. To find its location on the host:
+
+```bash
+docker volume inspect shopify-order-cancel-app_app-data
+```
+
+#### Environment File
+
+The `.env` file is loaded by docker-compose via the `env_file` directive. You can also override individual variables in the `environment` section of `docker-compose.yml`. Variables set in `environment` take precedence over those in `.env`.
+
+#### Using the Pre-built Image
+
+Instead of building locally, you can use the pre-built image from GitHub Container Registry:
+
+```bash
+docker pull ghcr.io/pbm-spain/shopify-order-cancel-app:latest
+```
+
+To use it in docker-compose, change the `build: .` line to:
+
+```yaml
+services:
+  app:
+    image: ghcr.io/pbm-spain/shopify-order-cancel-app:latest
+    # ... rest of config stays the same
+```
+
+Or run directly:
+
+```bash
+docker run -d \
+  --name shopify-cancel-app \
+  --env-file .env \
+  -e NODE_ENV=production \
+  -e DATA_DIR=/app/data \
+  -v cancel-app-data:/app/data \
+  -p 3000:3000 \
+  --restart unless-stopped \
+  ghcr.io/pbm-spain/shopify-order-cancel-app:latest
+```
+
+#### Development with Mailpit
+
+For local development, use the `dev` profile to start a local SMTP server (Mailpit) that catches all outgoing emails:
+
+```bash
+docker compose --profile dev up -d
+```
+
+- **Mailpit Web UI** (view caught emails): http://localhost:8025
+- **Mailpit SMTP**: localhost:1025
+
+Set these in your `.env` for local development:
+
+```
+SMTP_HOST=mailpit
+SMTP_PORT=1025
+SMTP_SECURE=false
+SMTP_USER=test
+SMTP_PASS=test
+```
+
+### Without Docker (Development)
+
+#### 1. Clone and Install
+
+```bash
+git clone https://github.com/pbm-spain/shopify-order-cancel-app.git
+cd shopify-order-cancel-app
+npm ci
+```
+
+> **Note:** `better-sqlite3` is a native C++ addon. On Linux, you may need `python3`, `make`, and `g++` installed. On macOS, Xcode Command Line Tools are required (`xcode-select --install`).
+
+#### 2. Configure Environment
+
+```bash
+cp .env.example .env
+# Edit .env with your values (see Environment Variables section)
+```
+
+#### 3. Run
+
+```bash
+# Development mode (auto-restarts on file changes)
+npm run dev
+
+# Production mode
+npm start
+```
+
+The server starts on `http://localhost:3000` by default:
+
+```bash
+curl http://localhost:3000/health
+# Expected: {"ok":true,"version":"0.12.0"}
+```
 
 ---
 
 ## API Endpoints Reference
 
+### Health Check
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `GET` | `/health` | None | Returns `{"ok":true,"version":"0.12.0"}` when healthy, `503` with `{"ok":false,"error":"Database unavailable"}` if the database is unreachable. Used by Docker health checks, load balancers, and monitoring services. |
+
 ### Customer-Facing Endpoints
 
 | Method | Path | Auth | Rate Limit | Description |
 |---|---|---|---|---|
-| `GET` | `/health` | None | None | Health check. Returns `{"ok":true,"version":"0.12.0"}`. Returns `503` if database is unreachable. |
-| `GET` | `/cancel-order` | None | None | Serves the cancellation request form (HTML). |
-| `POST` | `/proxy/request` | App Proxy HMAC + CSRF | 5/min per IP, 3/hr per email | Submits a cancellation request. Validates the order, generates a token, and sends a confirmation email. |
-| `GET` | `/confirm?token=<token>` | Token in URL | 30/hr per IP | Confirms a cancellation from the email link. Validates the token, checks the order, and sends the cancel mutation to Shopify. |
+| `GET` | `/cancel-order` | None | None | Serves the standalone cancellation request form (HTML). Includes a CSRF token. |
+| `GET` | `/proxy` | App Proxy HMAC | None | Serves the cancellation form through Shopify's App Proxy. Returns `application/liquid` so Shopify wraps it in the store theme. Verifies HMAC signature and 5-minute timestamp window. |
+| `POST` | `/proxy/request` | App Proxy HMAC + CSRF | 5/min per IP, 3/hr per email | Submits a cancellation request. Validates the order via Shopify GraphQL API, checks eligibility (fulfillment status, financial status, age), generates a SHA-256 hashed token, and sends a confirmation email. Works for both App Proxy and standalone flows. |
+| `GET` | `/confirm?token=<token>` | Token in URL | 30/hr per IP | Confirms a cancellation from the email link. Validates the token (single-use, time-limited), re-verifies the order with Shopify, and sends the `orderCancel` GraphQL mutation. |
 
 ### Webhook Endpoints
 
-All webhook endpoints verify HMAC-SHA256 signatures using the raw request body and the `SHOPIFY_WEBHOOK_SECRET`. They always return `200 OK` to prevent Shopify from retrying indefinitely.
+All webhook endpoints verify HMAC-SHA256 signatures using the raw request body and `SHOPIFY_WEBHOOK_SECRET`. They always return `200 OK` to prevent Shopify from retrying indefinitely.
 
 | Method | Path | Shopify Topic | Description |
 |---|---|---|---|
-| `POST` | `/webhooks/orders/updated` | `orders/updated` | Auto-denies pending cancellation requests if the order ships or moves to a non-allowed fulfillment status. |
+| `POST` | `/webhooks/orders/updated` | `orders/updated` | Auto-denies pending cancellation requests if the order moves to a non-allowed fulfillment status (e.g., it ships). |
 | `POST` | `/webhooks/orders/cancelled` | `orders/cancelled` | Marks pending requests as `cancelled_externally` when an order is cancelled outside the app. |
 | `POST` | `/webhooks/refunds/create` | `refunds/create` | Marks pending refunds as approved when a refund is created outside the app. |
 
 ### Admin Endpoints
 
-All admin endpoints require authentication: either a server-side session cookie (from browser login) or a `Authorization: Bearer <ADMIN_API_TOKEN>` header.
+All admin endpoints require authentication: either a server-side session cookie (from browser login) or an `Authorization: Bearer <ADMIN_API_TOKEN>` header.
 
 | Method | Path | CSRF | Rate Limit | Description |
 |---|---|---|---|---|
-| `POST` | `/admin/login` | No | 5 attempts/15 min per IP | Authenticates with the admin token. Sets a session cookie with IP binding. |
+| `POST` | `/admin/login` | No | 5 attempts/15 min per IP | Authenticates with the admin token. Sets a session cookie with IP binding (8-hour TTL). |
 | `GET` | `/admin/logout` | No | None | Clears the session and redirects to login. |
-| `GET` | `/admin` | No | None | Renders the admin dashboard HTML (settings, pending refunds, cancellation history). |
-| `POST` | `/admin/api/settings` | Yes | 20/min per IP | Updates a setting. JSON body: `{"key": "...", "value": "..."}`. |
-| `POST` | `/admin/refund/approve` | Yes | None | Approves a pending refund. Creates the refund in Shopify and removes the `refund-pending` tag. |
-| `POST` | `/admin/refund/deny` | Yes | None | Denies a pending refund. Updates the status without creating a Shopify refund. |
+| `GET` | `/admin` | No | None | Renders the admin dashboard HTML (settings panel, pending refunds table, cancellation history table with pagination). |
+| `POST` | `/admin/api/settings` | Yes | 20/min per IP | Updates a setting. JSON body: `{"key": "auto_refund", "value": "true"}`. Valid keys: `auto_refund`, `allowed_fulfillment_statuses`, `allowed_financial_statuses`. |
+| `POST` | `/admin/refund/approve` | Yes | None | Approves a pending refund. Creates the refund in Shopify via `refundCreate` GraphQL mutation with an idempotency key and removes the `refund-pending` tag. Atomic state transition prevents double-approval. |
+| `POST` | `/admin/refund/deny` | Yes | None | Denies a pending refund. Updates the status in the database without creating a Shopify refund. |
 
 ---
 
@@ -509,18 +579,14 @@ Access the dashboard at `https://your-app.example.com/admin`. Log in with the va
 ### Settings Panel
 
 - **Auto-refund toggle:** When ON, cancellations automatically include a full refund. When OFF, orders are cancelled without refund and tagged `refund-pending` for manual review.
-- **Allowed fulfillment statuses:** Select which Shopify fulfillment statuses allow cancellation. Options include: Unfulfilled, Partially Fulfilled, Scheduled, On Hold. By default, only `UNFULFILLED` is allowed.
-- **Allowed financial statuses:** Select which Shopify financial statuses allow cancellation. Options include: Pending, Authorized, Paid, Partially Paid, Partially Refunded. By default: `PENDING`, `AUTHORIZED`, `PAID`.
+- **Allowed fulfillment statuses:** Select which Shopify fulfillment statuses allow cancellation. Options: Unfulfilled, Partially Fulfilled, Scheduled, On Hold. Default: `UNFULFILLED` only.
+- **Allowed financial statuses:** Select which Shopify financial statuses allow cancellation. Options: Pending, Authorized, Paid, Partially Paid, Partially Refunded. Default: `PENDING`, `AUTHORIZED`, `PAID`.
 
-Settings are persisted in the SQLite database and take effect immediately. All changes are logged in the audit trail.
+Settings are persisted in the SQLite database and take effect immediately.
 
 ### Pending Refunds Table
 
-When auto-refund is OFF, pending refunds appear in a paginated table (25 per page). Each row shows:
-- Order number (linked to Shopify admin)
-- Customer email
-- Cancellation date
-- **Approve** / **Deny** buttons
+When auto-refund is OFF, pending refunds appear in a paginated table (25 per page). Each row shows the order number (linked to Shopify admin), customer email, cancellation date, and **Approve** / **Deny** buttons.
 
 Approving a refund:
 1. Verifies the order is still cancelled in Shopify
@@ -532,145 +598,259 @@ Approving a refund:
 
 A paginated table of all processed cancellations with their refund status badge: **Automatic**, **Approved**, **Denied**, **Pending**, **Error**.
 
----
+### API Access
 
-## Webhooks
-
-### Webhook Topics and Behavior
-
-| Webhook | Trigger | App Behavior |
-|---|---|---|
-| `orders/updated` | Any change to an order (fulfillment, financial status, tags, etc.) | If an order with a `pending` cancellation request changes to a non-allowed fulfillment status (e.g., it ships), the pending request is automatically denied. |
-| `orders/cancelled` | An order is cancelled from any source (Shopify admin, API, another app) | If the order had a pending cancellation request in the app, it is marked as `cancelled_externally`. This prevents the customer from confirming an already-cancelled order. |
-| `refunds/create` | A refund is created from any source | If the order had a pending refund (`refund-pending` status), it is marked as `approved`. This syncs external refunds made directly in Shopify. |
-
-### HMAC Verification
-
-Every incoming webhook is verified before processing:
-
-1. The raw request body is read (before JSON parsing)
-2. HMAC-SHA256 is computed using `SHOPIFY_WEBHOOK_SECRET` as the key
-3. The computed hash is compared against the `X-Shopify-Hmac-Sha256` header using `crypto.timingSafeEqual`
-4. Requests with invalid signatures are rejected with `401 Unauthorized`
-
-### Deduplication and Idempotency
-
-Shopify may deliver the same webhook multiple times (network retries, at-least-once delivery). The app handles this:
-
-1. Each webhook has a unique `X-Shopify-Webhook-Id` header
-2. On receipt, the app attempts to insert the ID into the `webhook_events` table
-3. If the ID already exists (`ON CONFLICT DO NOTHING`), the webhook is silently skipped
-4. Old webhook events (>30 days) are automatically cleaned up by a background worker
-
-All webhook handlers return `200 OK` regardless of processing outcome. This prevents Shopify from retrying indefinitely on application errors.
-
----
-
-## Email Configuration
-
-The app sends confirmation emails via SMTP using Nodemailer. You need an SMTP provider that allows sending from your configured `EMAIL_FROM` address.
-
-### Common SMTP Provider Settings
-
-| Provider | `SMTP_HOST` | `SMTP_PORT` | `SMTP_SECURE` | `SMTP_USER` | `SMTP_PASS` |
-|---|---|---|---|---|---|
-| **Resend** | `smtp.resend.com` | `465` | `true` | `resend` | Your API key (`re_...`) |
-| **SendGrid** | `smtp.sendgrid.net` | `465` | `true` | `apikey` | Your API key (`SG...`) |
-| **Mailgun** | `smtp.mailgun.org` | `465` | `true` | Your Mailgun SMTP user | Your Mailgun SMTP password |
-| **Amazon SES** | `email-smtp.<region>.amazonaws.com` | `465` | `true` | Your SES SMTP user | Your SES SMTP password |
-| **Gmail** | `smtp.gmail.com` | `465` | `true` | Your Gmail address | App password (not your regular password) |
-
-### Email Retry Queue
-
-Failed email sends are automatically retried by a background worker:
-
-- Retries up to **5 times** with exponential backoff
-- Retry intervals: ~60s, ~120s, ~240s, ~480s, ~960s
-- The worker runs every **60 seconds** checking for failed emails
-- All failures are logged with full error details
-
-### Development: Local Email Testing with Mailpit
-
-For local development, you can use Mailpit to catch all outgoing emails without sending them:
+You can also interact with the admin programmatically using Bearer token authentication:
 
 ```bash
-# Start the app with Mailpit using Docker Compose
-docker compose --profile dev up -d
+# Toggle auto-refund
+curl -X POST https://your-app.example.com/admin/api/settings \
+  -H "Authorization: Bearer <your-admin-token>" \
+  -H "Content-Type: application/json" \
+  -d '{"key": "auto_refund", "value": "true"}'
 
-# Mailpit Web UI (view caught emails): http://localhost:8025
-# Mailpit SMTP: localhost:1025
-```
-
-Set these in your `.env` for local development:
-```
-SMTP_HOST=localhost
-SMTP_PORT=1025
-SMTP_SECURE=false
-SMTP_USER=test
-SMTP_PASS=test
+# Update allowed fulfillment statuses
+curl -X POST https://your-app.example.com/admin/api/settings \
+  -H "Authorization: Bearer <your-admin-token>" \
+  -H "Content-Type: application/json" \
+  -d '{"key": "allowed_fulfillment_statuses", "value": ["UNFULFILLED", "PARTIALLY_FULFILLED"]}'
 ```
 
 ---
 
-## Security
+## Database
 
-### Authentication & Authorization
+### Tables
 
-| Layer | Mechanism |
-|---|---|
-| App Proxy (customer requests) | HMAC-SHA256 signature verification using Shopify's shared secret |
-| Webhooks | HMAC-SHA256 signature verification using the webhook signing secret |
-| Admin dashboard (browser) | Opaque server-side session tokens with IP binding (8-hour TTL) |
-| Admin API (programmatic) | Bearer token authentication (`Authorization: Bearer <token>`) |
+The app uses a single SQLite database running in WAL (Write-Ahead Logging) mode for concurrent read/write access, with a 5-second busy timeout.
 
-### CSRF Protection
+#### `cancel_requests`
 
-- **Customer forms:** Double-submit cookie pattern. A random token is set in a cookie and included as a hidden form field. Both must match on submission.
-- **Admin panel:** Session-based CSRF tokens. One token per session, verified with `crypto.timingSafeEqual`.
+Stores every cancellation request.
 
-### Rate Limiting
+| Column | Type | Description |
+|---|---|---|
+| `id` | TEXT (UUID) | Primary key |
+| `token_hash` | TEXT | SHA-256 hash of the confirmation token (UNIQUE) |
+| `shop_domain` | TEXT | Shopify store domain |
+| `order_id` | TEXT | Shopify GraphQL GID (e.g., `gid://shopify/Order/123`) |
+| `order_number` | TEXT | Human-readable order number (e.g., `#1001`) |
+| `email` | TEXT | Customer email (normalized to lowercase) |
+| `status` | TEXT | Request status: `pending_confirmation`, `cancelled`, `denied`, `error`, `cancelled_externally` |
+| `refund_status` | TEXT | Refund status: `none`, `pending_approval`, `approved`, `denied`, `auto_refunded`, `error` |
+| `expires_at` | TEXT | Token expiration timestamp |
+| `created_at` | TEXT | Request creation timestamp |
+| `updated_at` | TEXT | Last update timestamp |
+| `used_at` | TEXT | When the token was used (NULL if unused) |
+| `cancelled_at` | TEXT | When the order was cancelled |
+| `cancel_job_id` | TEXT | Shopify async Job ID from `orderCancel` mutation |
+| `refunded_at` | TEXT | When the refund was processed |
+| `ip_address` | TEXT | Client IP address |
+| `email_sent` | INTEGER | Whether the confirmation email was sent (0/1) |
+| `email_attempts` | INTEGER | Number of email send attempts |
+| `last_email_attempt_at` | TEXT | Timestamp of last email attempt |
 
-| Endpoint | Limit | Window | Key |
-|---|---|---|---|
-| `POST /proxy/request` | 5 requests | 1 minute | Per IP address |
-| `POST /proxy/request` | 3 requests | 1 hour | Per email address |
-| `GET /confirm` | 30 requests | 1 hour | Per IP address |
-| `POST /admin/login` | 5 attempts | 15 minutes | Per IP address |
-| `POST /admin/api/settings` | 20 requests | 1 minute | Per IP address |
+#### `admin_settings`
 
-Rate limiting uses an in-memory sliding window implementation. Counters are not persisted and reset on app restart.
+Key-value store for admin-configurable settings.
 
-### Token Security
+| Column | Type | Description |
+|---|---|---|
+| `key` | TEXT | Setting name (PRIMARY KEY) |
+| `value` | TEXT | Setting value (JSON for arrays) |
+| `updated_at` | TEXT | Last update timestamp |
 
-- Confirmation tokens are 64-character hex strings (256-bit entropy, generated with `crypto.randomBytes`)
-- Tokens are hashed with SHA-256 before database storage — raw tokens never touch the database
-- Tokens are single-use: atomic `WHERE used_at IS NULL` check prevents reuse
-- Tokens expire after `CANCEL_TOKEN_TTL_MINUTES` (default: 30 minutes)
+Default settings:
+- `auto_refund`: `true`
+- `allowed_fulfillment_statuses`: `["UNFULFILLED"]`
+- `allowed_financial_statuses`: `["PENDING", "AUTHORIZED", "PAID"]`
 
-### HTTP Security Headers
+#### `webhook_events`
 
-Every response includes:
+Webhook deduplication log.
 
+| Column | Type | Description |
+|---|---|---|
+| `webhook_id` | TEXT | Shopify webhook ID (PRIMARY KEY) |
+| `received_at` | TEXT | When the webhook was received |
+
+### Storage Location
+
+- **Docker**: `/app/data/cancel-requests.db` (inside the container), persisted via the `app-data` named volume
+- **Without Docker**: `./data/cancel-requests.db` by default, configurable via `DATA_DIR`
+
+The database is created automatically on first startup. All tables and indexes are created via `CREATE TABLE IF NOT EXISTS` statements.
+
+### Backup Strategy
+
+The included backup script (`scripts/backup-db.sh`) creates consistent, hot backups without stopping the app:
+
+1. Uses SQLite's `VACUUM INTO` for a consistent point-in-time snapshot (safe with WAL mode)
+2. Compresses the backup with gzip
+3. Verifies backup integrity with `PRAGMA integrity_check`
+4. Auto-deletes backups older than `BACKUP_RETENTION_DAYS` (default: 30)
+
+See [Docker Operations > Using the Backup Script](#using-the-backup-script) for how to run backups in Docker.
+
+---
+
+## Docker Operations
+
+The Docker image includes `sqlite3`, `curl`, and the backup script, so you can perform all operational tasks directly inside the container. The container is named `shopify-cancel-app` (set in `docker-compose.yml`).
+
+### Running Backups
+
+Create a one-off backup of the database:
+
+```bash
+docker exec shopify-cancel-app sqlite3 /app/data/cancel-requests.db ".backup /app/data/backup.db"
 ```
-Content-Security-Policy: default-src 'self'; script-src 'self' 'nonce-<random>'; style-src 'self' 'nonce-<random>';
-X-Content-Type-Options: nosniff
-X-Frame-Options: DENY
-Referrer-Policy: strict-origin-when-cross-origin
-Strict-Transport-Security: max-age=31536000; includeSubDomains  (only over HTTPS)
+
+This creates a raw SQLite backup at `/app/data/backup.db` inside the container (persisted in the volume).
+
+### Inspecting the Database
+
+Open an interactive SQLite session:
+
+```bash
+docker exec -it shopify-cancel-app sqlite3 /app/data/cancel-requests.db
 ```
 
-CSP nonces are randomly generated per request and injected into all `<style>` and `<script>` tags.
+Useful queries inside the SQLite shell:
 
-### Additional Protections
+```sql
+-- List all tables
+.tables
 
-- All sensitive comparisons (HMAC, tokens, passwords) use `crypto.timingSafeEqual` to prevent timing attacks
-- SQL injection prevention via prepared statements (better-sqlite3 parameterized queries)
-- Input validation on all user inputs: email format regex, order number regex (`#\d+`), UUID format validation
-- Open redirect protection on admin login (redirect URLs are validated)
-- Content-Type validation: returns `415 Unsupported Media Type` for unexpected content types
-- Request body size limit: 10KB maximum
-- Admin session IP binding: sessions are invalidated if the client IP changes (protects against session fixation)
-- `TRUST_PROXY` must be explicitly enabled — prevents `X-Forwarded-For` header spoofing that would bypass IP-based rate limits
+-- View schema
+.schema cancel_requests
+
+-- Recent cancellation requests
+SELECT id, order_number, email, status, refund_status, created_at
+FROM cancel_requests ORDER BY created_at DESC LIMIT 20;
+
+-- Pending refunds
+SELECT order_number, email, created_at
+FROM cancel_requests WHERE refund_status = 'pending_approval';
+
+-- Count requests by status
+SELECT status, COUNT(*) FROM cancel_requests GROUP BY status;
+
+-- Count requests by refund status
+SELECT refund_status, COUNT(*) FROM cancel_requests GROUP BY refund_status;
+
+-- Check admin settings
+SELECT * FROM admin_settings;
+
+-- Recent webhook events
+SELECT * FROM webhook_events ORDER BY received_at DESC LIMIT 10;
+
+-- Exit
+.quit
+```
+
+One-liner queries (non-interactive):
+
+```bash
+# Count total requests
+docker exec shopify-cancel-app sqlite3 /app/data/cancel-requests.db "SELECT COUNT(*) FROM cancel_requests;"
+
+# List pending refunds
+docker exec shopify-cancel-app sqlite3 /app/data/cancel-requests.db \
+  "SELECT order_number, email, created_at FROM cancel_requests WHERE refund_status = 'pending_approval';"
+
+# Check current settings
+docker exec shopify-cancel-app sqlite3 /app/data/cancel-requests.db "SELECT * FROM admin_settings;"
+```
+
+### Viewing Logs
+
+```bash
+# Follow logs in real-time
+docker logs -f shopify-cancel-app
+
+# Last 100 lines
+docker logs --tail 100 shopify-cancel-app
+
+# Logs since a specific time
+docker logs --since 2h shopify-cancel-app
+
+# Logs with timestamps
+docker logs -t shopify-cancel-app
+```
+
+All logs are JSON-formatted to stdout/stderr, compatible with any log aggregation service (Datadog, CloudWatch, ELK, Loki, Grafana, etc.).
+
+### Health Check
+
+```bash
+# Check health from inside the container
+docker exec shopify-cancel-app curl -f http://localhost:3000/health
+
+# Check health from the host
+curl http://localhost:3000/health
+
+# Check Docker's built-in health status
+docker inspect --format='{{.State.Health.Status}}' shopify-cancel-app
+```
+
+The Docker image includes an automatic health check (every 30 seconds, 5-second timeout, 3 retries). Docker will mark the container as `unhealthy` if the health check fails.
+
+### Using the Backup Script
+
+The backup script creates compressed, integrity-verified backups with automatic retention:
+
+```bash
+# Run the backup script (uses defaults: /app/data/backups, 30-day retention)
+docker exec shopify-cancel-app /app/scripts/backup-db.sh
+
+# Custom backup directory and retention
+docker exec -e BACKUP_DIR=/app/data/backups -e BACKUP_RETENTION_DAYS=14 \
+  shopify-cancel-app /app/scripts/backup-db.sh
+
+# List existing backups
+docker exec shopify-cancel-app ls -la /app/data/backups/
+```
+
+**Automated daily backups via cron** (run on the host):
+
+```bash
+# Edit the host's crontab
+crontab -e
+
+# Add this line for daily backups at 03:00
+0 3 * * * docker exec shopify-cancel-app /app/scripts/backup-db.sh >> /var/log/cancel-app-backup.log 2>&1
+```
+
+**Copy a backup to the host:**
+
+```bash
+docker cp shopify-cancel-app:/app/data/backups/ ./local-backups/
+```
+
+### Accessing a Shell Inside the Container
+
+```bash
+docker exec -it shopify-cancel-app sh
+```
+
+From inside the container, you can run any commands: `sqlite3`, `curl`, `node`, etc.
+
+### Updating the Application
+
+```bash
+# Pull latest code
+git pull origin main
+
+# Rebuild and restart
+docker compose up -d --build
+
+# Or if using the pre-built image
+docker compose pull
+docker compose up -d
+```
+
+The database volume persists across rebuilds — your data is safe.
 
 ---
 
@@ -703,81 +883,16 @@ The test suite uses **Vitest** as the test runner, **supertest** for HTTP integr
 | Admin Auth | `admin-auth.test.js` | P0/P1 | Bearer token auth, session auth, login/logout flow, rate limiting, open redirect prevention |
 | Webhook HMAC | `webhook-hmac.test.js` | P0/P1 | HMAC signature verification, deduplication, timing safety, all three webhook handlers |
 | Views | `views.test.js` | P2 | HTML rendering helpers (table generation, status badges, pagination, XSS prevention) |
-| Error Handler | `error-handler.test.js` | P2 | Error capture, Express error middleware, Sentry integration |
+| Error Handler | `error-handler.test.js` | P2 | Error capture, Express error middleware |
 | Edge Cases | `edge-cases.test.js` | P2 | Token expiry/reuse, admin pagination, settings validation, storage atomicity |
 
-### Manual Testing Flow
+---
 
-#### 1. Verify the app is running
-
-```bash
-curl http://localhost:3000/health
-# Expected: {"ok":true,"version":"0.12.0"}
-```
-
-#### 2. Open the cancellation form
-
-Navigate to `http://localhost:3000/cancel-order` in a browser (or via your Shopify store's App Proxy URL at `https://your-store.myshopify.com/apps/order-cancel/cancel-order`).
-
-#### 3. Submit a cancellation request
-
-Through the form in the browser, or via curl:
-
-```bash
-curl -X POST http://localhost:3000/proxy/request \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "email=customer@example.com&orderNumber=%231001&_csrf=<token>"
-```
-
-> In production, the App Proxy HMAC signature is required. During local development, requests must come through the Shopify storefront or the signature check must be accounted for.
-
-#### 4. Confirm the cancellation
-
-Check the email for the confirmation link. If using Mailpit locally, visit `http://localhost:8025`. You can also find the token hash in the database:
-
-```bash
-sqlite3 data/cancel-requests.db "SELECT * FROM cancel_requests ORDER BY created_at DESC LIMIT 1;"
-```
-
-#### 5. Access the admin dashboard
-
-```bash
-# In a browser
-open http://localhost:3000/admin
-# Login with your ADMIN_API_TOKEN value
-
-# Or via API with Bearer token
-curl http://localhost:3000/admin \
-  -H "Authorization: Bearer <your-admin-token>"
-```
-
-#### 6. Test admin settings API
-
-```bash
-# Toggle auto-refund
-curl -X POST http://localhost:3000/admin/api/settings \
-  -H "Authorization: Bearer <your-admin-token>" \
-  -H "Content-Type: application/json" \
-  -d '{"key": "auto_refund", "value": "true"}'
-
-# Update allowed fulfillment statuses
-curl -X POST http://localhost:3000/admin/api/settings \
-  -H "Authorization: Bearer <your-admin-token>" \
-  -H "Content-Type: application/json" \
-  -d '{"key": "allowed_fulfillment_statuses", "value": ["UNFULFILLED", "PARTIALLY_FULFILLED"]}'
-```
-
-#### 7. Test webhooks with Shopify CLI
-
-```bash
-shopify app webhook trigger \
-  --topic orders/cancelled \
-  --address https://your-app.example.com/webhooks/orders/cancelled
-```
+## CI/CD
 
 ### CI Pipeline
 
-The GitHub Actions CI runs on every push and pull request to `main`:
+The GitHub Actions CI runs on every push and pull request to `main` (`.github/workflows/ci.yml`):
 
 1. **Matrix test** — Runs on Node.js 20 and 22
 2. **Security audit** — `npm audit --audit-level=high` (fails on high/critical vulnerabilities)
@@ -786,90 +901,143 @@ The GitHub Actions CI runs on every push and pull request to `main`:
 
 ### Docker Publish Pipeline
 
-On every push to `main`, the Docker Publish workflow:
+On every push to `main`, the Docker Publish workflow (`.github/workflows/docker-publish.yml`):
 
 1. Builds a multi-platform image (`linux/amd64` + `linux/arm64`)
-2. Pushes to `ghcr.io/pbm-spain/shopify-order-cancel-app` with tags: `latest` and `sha-<commit>`
-3. Uses GitHub Actions layer caching for faster builds
+2. Runs a Trivy vulnerability scan (severity: CRITICAL, HIGH)
+3. Pushes to `ghcr.io/pbm-spain/shopify-order-cancel-app` with tags: `latest` and `sha-<commit>`
+4. Uses GitHub Actions layer caching for faster builds
 
 ---
 
-## Deployment
+## Security
 
-### Docker (Recommended)
+### Authentication and Authorization
 
-#### Option A: Pre-built image from GitHub Container Registry
+| Layer | Mechanism |
+|---|---|
+| App Proxy (customer requests) | HMAC-SHA256 signature verification using Shopify's shared secret + 5-minute timestamp window |
+| Webhooks | HMAC-SHA256 signature verification using the webhook signing secret |
+| Admin dashboard (browser) | Opaque server-side session tokens with IP binding (8-hour TTL) |
+| Admin API (programmatic) | Bearer token authentication (`Authorization: Bearer <token>`) |
 
-The image is automatically built and published on every push to `main` for both `linux/amd64` and `linux/arm64`.
+### CSRF Protection
 
-```bash
-# Pull the latest image
-docker pull ghcr.io/pbm-spain/shopify-order-cancel-app:latest
+- **Customer forms:** Double-submit cookie pattern. A random token is set in a cookie and included as a hidden form field. Both must match on submission (timing-safe comparison).
+- **Admin panel:** Session-based CSRF tokens. One token per session, verified with `crypto.timingSafeEqual`.
 
-# Run with an env file and persistent volume
-docker run -d \
-  --name shopify-cancel-app \
-  --env-file .env \
-  -e NODE_ENV=production \
-  -e DATA_DIR=/app/data \
-  -v cancel-app-data:/app/data \
-  -p 3000:3000 \
-  --restart unless-stopped \
-  ghcr.io/pbm-spain/shopify-order-cancel-app:latest
+### Rate Limiting
+
+| Endpoint | Limit | Window | Key |
+|---|---|---|---|
+| `POST /proxy/request` | 5 requests | 1 minute | Per IP address |
+| `POST /proxy/request` | 3 requests | 1 hour | Per email address |
+| `GET /confirm` | 30 requests | 1 hour | Per IP address |
+| `POST /admin/login` | 5 attempts | 15 minutes | Per IP address |
+| `POST /admin/api/settings` | 20 requests | 1 minute | Per IP address |
+
+Rate limiting uses an in-memory sliding window implementation. Counters reset on app restart.
+
+### Token Security
+
+- Confirmation tokens are 64-character hex strings (256-bit entropy, generated with `crypto.randomBytes`)
+- Tokens are hashed with SHA-256 before database storage — raw tokens never touch the database
+- Tokens are single-use: atomic `WHERE used_at IS NULL` check prevents reuse
+- Tokens expire after `CANCEL_TOKEN_TTL_MINUTES` (default: 30 minutes)
+
+### HTTP Security Headers
+
+Every response includes:
+
+```
+Content-Security-Policy: default-src 'self'; script-src 'self' 'nonce-<random>'; style-src 'self' 'nonce-<random>' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com
+X-Content-Type-Options: nosniff
+X-Frame-Options: DENY
+Referrer-Policy: strict-origin-when-cross-origin
+Strict-Transport-Security: max-age=31536000; includeSubDomains  (HTTPS only)
 ```
 
-Or use the pre-built image in `docker-compose.yml`:
+CSP nonces are randomly generated per request and injected into all `<style>` and `<script>` tags.
 
-```yaml
-services:
-  app:
-    image: ghcr.io/pbm-spain/shopify-order-cancel-app:latest
-    ports:
-      - "3000:3000"
-    env_file:
-      - .env
-    environment:
-      - NODE_ENV=production
-      - DATA_DIR=/app/data
-    volumes:
-      - app-data:/app/data
-    restart: unless-stopped
+### Additional Protections
 
-volumes:
-  app-data:
-```
+- All sensitive comparisons (HMAC, tokens) use `crypto.timingSafeEqual` to prevent timing attacks
+- SQL injection prevention via prepared statements (better-sqlite3 parameterized queries)
+- Input validation on all user inputs: email format regex, order number regex (`#` + digits), UUID format validation
+- Open redirect protection on admin login (redirect URLs are validated to `/admin` paths only)
+- Content-Type validation: returns `415 Unsupported Media Type` for unexpected content types
+- Request body size limit: 10KB maximum
+- Admin session IP binding: sessions are invalidated if the client IP changes
+- `TRUST_PROXY` must be explicitly enabled — prevents `X-Forwarded-For` header spoofing
+- Sensitive query parameters (`token`, `signature`, `hmac`) are redacted in HTTP access logs
+- Admin token is hashed at startup — not stored in plaintext in memory
 
-#### Option B: Build locally
+---
 
-```bash
-# Production build and run
-docker compose up -d
+## Troubleshooting
 
-# Development with local Mailpit SMTP (catches all outgoing email)
-docker compose --profile dev up -d
-# Mailpit web UI: http://localhost:8025
-# SMTP endpoint: localhost:1025
-```
+### "Invalid App Proxy signature"
 
-The Dockerfile uses a multi-stage build:
-1. **Stage 1 (deps):** Installs build tools (`python3`, `make`, `g++`) and production dependencies on Node 20 Alpine
-2. **Stage 2 (production):** Copies only production dependencies and app source, runs as non-root user (`appuser:appgroup`), includes health check
+- Verify `SHOPIFY_APP_PROXY_SHARED_SECRET` matches the secret in your Shopify app's App Proxy settings
+- Ensure you are accessing the form through the Shopify storefront URL (`https://your-store.myshopify.com/apps/order-cancel/...`), not directly hitting your server
+- The signature is only valid for requests proxied through Shopify
 
-#### Option C: Pull a specific version
+### "Invalid webhook signature"
 
-```bash
-docker pull ghcr.io/pbm-spain/shopify-order-cancel-app:sha-<full-commit-sha>
-```
+- Verify `SHOPIFY_WEBHOOK_SECRET` matches the signing secret in your app's webhook settings
+- Ensure the webhook endpoint URL matches your `APP_BASE_URL` exactly (including protocol and path)
+- Check that no middleware is modifying the raw request body before signature verification
 
-### Railway / Render / Fly.io
+### Emails not sending
 
-1. Connect your GitHub repository
-2. Set all environment variables from [Environment Variables Reference](#environment-variables-reference)
-3. Set the build command to `npm ci`
-4. Set the start command to `npm start`
-5. Ensure `DATA_DIR` points to a persistent volume (e.g., `/data`)
-6. Configure health check to `GET /health`
-7. Set the `PORT` environment variable if the platform requires it (some auto-assign)
+- Check SMTP credentials in `.env` (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`)
+- Verify your SMTP provider allows sending from the `EMAIL_FROM` address (sender verification/domain authentication may be required)
+- Check logs for email errors: set `LOG_LEVEL=debug` and restart
+- Failed emails are retried up to 5 times by the background queue
+- For local testing, use Mailpit: `docker compose --profile dev up -d` and check `http://localhost:8025`
+
+### Rate limit issues
+
+- If behind a proxy, set `TRUST_PROXY=1` so Express reads the real client IP from `X-Forwarded-For`
+- Without `TRUST_PROXY`, all requests appear from the proxy's IP, triggering rate limits immediately
+- Rate limit counters reset on app restart (in-memory only)
+
+### Admin dashboard won't load
+
+- Ensure `ADMIN_API_TOKEN` is set in `.env` and is at least 16 characters
+- If you get "Session IP mismatch", your IP may have changed — log in again
+- Clear browser cookies if sessions are stale
+- Check that you are using the correct token value (no extra whitespace)
+
+### Database errors
+
+- Ensure `DATA_DIR` exists and is writable by the app process
+- In Docker, check the volume is mounted correctly: `docker inspect shopify-cancel-app`
+- Check available disk space: `df -h`
+- The database uses WAL mode with a 5-second busy timeout — concurrency is generally not an issue
+- If the database is corrupted, restore from a backup and check disk health
+
+### Order not found / not cancelable
+
+- Order must be within `ORDER_LOOKBACK_DAYS` (default: 90 days)
+- Order's fulfillment status must be in the allowed list (default: `UNFULFILLED`)
+- Order's financial status must be in the allowed list (default: `PENDING`, `AUTHORIZED`, `PAID`)
+- Order must not have fulfillment orders with status `IN_PROGRESS`, `ON_HOLD`, or `INCOMPLETE`
+- Check the admin dashboard settings to see current allowed statuses
+
+### Connection issues
+
+- Verify your `APP_BASE_URL` is reachable from the internet (Shopify needs to reach it for App Proxy and webhooks)
+- Check firewall rules allow inbound traffic on your configured port
+- For HTTPS, verify your SSL certificate is valid and not expired
+- Check DNS resolution for your domain
+
+### Docker-specific issues
+
+- **Container keeps restarting:** Check logs with `docker logs shopify-cancel-app` — likely a missing or invalid environment variable
+- **Health check failing:** Run `docker exec shopify-cancel-app curl -f http://localhost:3000/health` to see the response
+- **Database permissions:** The container runs as non-root user `appuser` (UID 1001). Ensure the data volume is writable
+- **Cannot exec into container:** Use `docker exec -it shopify-cancel-app sh` (not bash — Alpine uses sh)
 
 ### VPS with Nginx
 
@@ -900,214 +1068,7 @@ server {
 }
 ```
 
-> **Important:** When behind a reverse proxy, set `TRUST_PROXY=1` in your `.env`. Without this, all rate limits see the proxy's IP instead of the real client IP.
-
-### Process Management (systemd)
-
-Create `/etc/systemd/system/shopify-cancel-app.service`:
-
-```ini
-[Unit]
-Description=Shopify Order Cancel App
-After=network.target
-
-[Service]
-Type=simple
-User=deploy
-WorkingDirectory=/opt/shopify-cancel-app
-ExecStart=/usr/bin/node src/server.js
-Restart=on-failure
-RestartSec=5
-Environment=NODE_ENV=production
-EnvironmentFile=/opt/shopify-cancel-app/.env
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Then enable and start:
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable shopify-cancel-app
-sudo systemctl start shopify-cancel-app
-sudo systemctl status shopify-cancel-app
-```
-
-### Persistent Storage
-
-The SQLite database is stored at `DATA_DIR/cancel-requests.db`. This directory must:
-
-- Be on persistent storage (not ephemeral container filesystem)
-- Have read/write permissions for the app process
-- Have sufficient disk space (the database grows slowly, typically under 100MB even for high-volume stores)
-- Be backed up regularly (see [Database Backups](#database-backups))
-
-### Database Backups
-
-The included backup script creates consistent, hot backups without stopping the app:
-
-```bash
-# Manual backup
-npm run backup
-
-# With custom settings
-DATA_DIR=/app/data BACKUP_DIR=/mnt/backups BACKUP_RETENTION_DAYS=14 ./scripts/backup-db.sh
-
-# Automated daily backup via cron (at 03:00)
-0 3 * * * cd /opt/shopify-cancel-app && ./scripts/backup-db.sh >> /var/log/cancel-app-backup.log 2>&1
-```
-
-The script:
-1. Uses SQLite's `VACUUM INTO` for a consistent point-in-time snapshot (safe with WAL mode)
-2. Compresses the backup with gzip
-3. Verifies backup integrity
-4. Auto-deletes backups older than `BACKUP_RETENTION_DAYS` (default: 30)
-
-### Error Monitoring
-
-The app includes a pluggable error monitoring integration. Without any configuration, all errors are captured via structured JSON logging.
-
-To enable Sentry:
-
-```bash
-npm install @sentry/node
-```
-
-Add to `.env`:
-```
-SENTRY_DSN=https://examplePublicKey@o0.ingest.sentry.io/0
-SENTRY_TRACES_SAMPLE_RATE=0.1
-```
-
-The integration automatically:
-- Scrubs sensitive headers (`Authorization`, `Cookie`) before sending to external services
-- Catches unhandled promise rejections and uncaught exceptions
-- Provides Express error-handling middleware for route errors
-
-### Graceful Shutdown
-
-The app handles `SIGINT` and `SIGTERM` signals cleanly:
-
-1. Stops accepting new connections
-2. Waits for in-flight requests to complete (10-second timeout)
-3. Stops background workers (email retry queue, session cleanup, webhook cleanup)
-4. Optimizes and closes the SQLite database (WAL checkpoint)
-5. Exits with code 0
-
-This ensures zero data loss during deployments and container restarts.
-
----
-
-## Monitoring & Logging
-
-### Structured Logging
-
-All logs are JSON-formatted to stdout/stderr, compatible with any log aggregation service (Datadog, CloudWatch, ELK, Loki, Grafana, etc.):
-
-```json
-{"timestamp":"2026-03-30T10:00:00.000Z","level":"info","message":"Order cancelled successfully","orderId":"gid://shopify/Order/123","jobId":"gid://shopify/Job/456","withRefund":false}
-```
-
-### Log Levels
-
-| Level | Content |
-|---|---|
-| `debug` | GraphQL error details, webhook skip reasons, detailed flow tracing |
-| `info` | Order searches, cancellations, refunds, email sends, settings changes |
-| `warn` | Invalid HMAC signatures, failed email sends, parse errors, skipped webhooks |
-| `error` | Shopify API errors, unhandled failures, database errors, health check failures |
-| `audit` | Always logged regardless of `LOG_LEVEL` — security-sensitive events (see below) |
-
-### Audit Trail
-
-Security-sensitive events are always logged at `audit` level with structured data:
-
-| Event | Description |
-|---|---|
-| `cancel_requested` | Customer submitted a cancellation request |
-| `cancel_confirmed` | Customer confirmed a cancellation via the email link |
-| `cancel_confirmed_refund_pending` | Customer confirmed, but refund is pending admin review |
-| `refund_approved` | Admin approved a pending refund |
-| `refund_denied` | Admin denied a pending refund |
-| `admin_setting_changed` | Admin modified a setting |
-
-All audit events include a `traceId` (UUID) for request correlation across log entries.
-
-### Health Check
-
-```
-GET /health → {"ok":true,"version":"0.12.0"}
-```
-
-Returns `503 Service Unavailable` with `{"ok":false}` if the database is unreachable. Use this endpoint for:
-- Uptime monitoring (Pingdom, UptimeRobot, etc.)
-- Load balancer health probes
-- Docker/Kubernetes health checks
-- Platform readiness checks (Railway, Render, etc.)
-
-### HTTP Access Logs
-
-Morgan (`combined` format) logs every HTTP request to stdout, including method, path, status code, response time, and user agent.
-
----
-
-## Troubleshooting
-
-### "Invalid App Proxy signature"
-
-- Verify `SHOPIFY_APP_PROXY_SHARED_SECRET` matches the secret in your Shopify app's App Proxy settings
-- Ensure you're accessing the form through the Shopify storefront URL (`https://your-store.myshopify.com/apps/order-cancel/...`), not directly hitting your server
-- The signature is only valid for requests proxied through Shopify
-
-### "Invalid webhook signature"
-
-- Verify `SHOPIFY_WEBHOOK_SECRET` matches the signing secret in your app's webhook settings (Partner Dashboard or store admin)
-- Ensure the webhook endpoint URL matches your `APP_BASE_URL` exactly (including protocol and path)
-- Check that no middleware is modifying the raw request body before signature verification
-
-### Emails not sending
-
-- Check SMTP credentials in `.env` (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`)
-- Verify your SMTP provider allows sending from the `EMAIL_FROM` address (sender verification/domain authentication may be required)
-- Check logs for email errors: `LOG_LEVEL=debug npm start`
-- Failed emails are retried up to 5 times by the background queue (check logs for retry attempts)
-- For local testing, use Mailpit: `docker compose --profile dev up -d` and check `http://localhost:8025`
-
-### Rate limit issues
-
-- If behind a proxy, set `TRUST_PROXY=1` so Express reads the real client IP from `X-Forwarded-For`
-- Without `TRUST_PROXY`, all requests appear from the proxy's IP, triggering rate limits immediately
-- Rate limit counters reset on app restart (they are in-memory only)
-
-### Admin dashboard won't load
-
-- Ensure `ADMIN_API_TOKEN` is set in `.env` and is at least 16 characters
-- If you get "Session IP mismatch", your IP may have changed — log in again
-- Clear browser cookies if sessions are stale
-- Check that you're using the correct token value (no extra whitespace)
-
-### Database errors
-
-- Ensure `DATA_DIR` exists and is writable by the app process: `mkdir -p data && chmod 755 data`
-- Check available disk space: `df -h`
-- The database uses WAL mode with a 5-second busy timeout — high concurrency is generally not an issue for single-instance deployments
-- If the database is corrupted, restore from a backup and check disk health
-
-### Order not found / not cancelable
-
-- Order must be within `ORDER_LOOKBACK_DAYS` (default: 90 days from order creation)
-- Order's fulfillment status must be in the allowed list (default: `UNFULFILLED`)
-- Order's financial status must be in the allowed list (default: `PENDING`, `AUTHORIZED`, `PAID`)
-- Order must not have fulfillment orders with status `IN_PROGRESS`, `ON_HOLD`, or `INCOMPLETE`
-- Check the admin dashboard settings to see current allowed statuses
-
-### Connection issues
-
-- Verify your `APP_BASE_URL` is reachable from the internet (Shopify needs to reach it for App Proxy and webhooks)
-- Check firewall rules allow inbound traffic on your configured port
-- For HTTPS, verify your SSL certificate is valid and not expired
-- Check DNS resolution for your domain
+> **Important:** When behind a reverse proxy, set `TRUST_PROXY=1` in your `.env`.
 
 ---
 
