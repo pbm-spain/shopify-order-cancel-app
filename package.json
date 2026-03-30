@@ -1,6 +1,6 @@
 {
   "name": "shopify-order-cancel-confirmation-app",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,7 +9,8 @@
     "lint": "eslint src/",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "backup": "bash scripts/backup-db.sh"
   },
   "dependencies": {
     "better-sqlite3": "^11.7.0",

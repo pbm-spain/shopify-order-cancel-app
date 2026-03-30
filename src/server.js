@@ -1,9 +1,14 @@
-import app, { adminSessionCleanupInterval } from './app.js';
+import app from './app.js';
 import { config } from './config.js';
 import { logger } from './logger.js';
 import { startEmailQueue, stopEmailQueue } from './emailQueue.js';
 import { startSessionCleanup, stopSessionCleanup } from './adminAuth.js';
 import { cleanupOldWebhookEvents, closeDb } from './storage.js';
+import { setupGlobalErrorHandlers } from './errorHandler.js';
+
+// ─── Global error handlers ──────────────────────────────────────────
+
+setupGlobalErrorHandlers();
 
 // ─── Start background workers ────────────────────────────────────────
 
@@ -34,7 +39,6 @@ function shutdown() {
 
   try { stopEmailQueue(); } catch (e) { logger.warn('Failed to stop email queue', { error: e.message }); }
   try { stopSessionCleanup(); } catch (e) { logger.warn('Failed to stop session cleanup', { error: e.message }); }
-  try { clearInterval(adminSessionCleanupInterval); } catch (e) { logger.warn('Failed to stop admin session cleanup', { error: e.message }); }
   try { clearInterval(webhookCleanupInterval); } catch (e) { logger.warn('Failed to stop webhook cleanup', { error: e.message }); }
 
   const forceExitTimeout = setTimeout(() => {

@@ -194,24 +194,39 @@ Or use Liquid on the order status page:
 
 ```
 src/
-├── server.js        # Express app, routes, middleware, HTML template rendering
+├── server.js        # Entry point, background workers, graceful shutdown
+├── app.js           # Express routes, middleware, request handling
 ├── config.js        # Environment variable loading with validation
 ├── shopify.js       # Shopify Admin GraphQL API client (queries + mutations)
 ├── storage.js       # SQLite database layer (better-sqlite3, WAL mode)
 ├── appProxy.js      # Shopify App Proxy HMAC signature verification
-├── adminAuth.js     # Admin session authentication (opaque tokens, IP binding)
-├── csrf.js          # CSRF protection (double-submit cookie pattern)
+├── adminAuth.js     # Admin session auth, IP binding, and admin CSRF tokens
+├── csrf.js          # CSRF protection for customer forms (double-submit cookies)
 ├── email.js         # Nodemailer transport + confirmation email template
 ├── emailQueue.js    # Background email retry worker (exponential backoff)
+├── errorHandler.js  # Pluggable error monitoring (Sentry-ready, structured logging)
 ├── rateLimit.js     # In-memory sliding window rate limiter
 ├── logger.js        # Structured JSON logging + audit trail
 ├── utils.js         # Token generation, hashing, input normalization
+├── views.js         # HTML rendering helpers (tables, badges, pagination)
 └── webhooks.js      # Shopify webhook handlers (HMAC verification + processing)
 views/
 ├── form.html        # Customer cancellation request form
 ├── admin.html       # Admin dashboard (settings, pending refunds, history)
 ├── success.html     # Cancellation confirmed page
 └── request-sent.html # "Check your email" confirmation page
+scripts/
+└── backup-db.sh     # SQLite hot backup with compression and retention
+tests/
+├── setup.js         # Test environment variables
+├── helpers.js       # HMAC generators, Shopify GraphQL mock fixtures
+├── cancel-flow.test.js    # Cancellation flow tests (P0/P1)
+├── refund-flow.test.js    # Refund approval/denial tests (P0/P1)
+├── admin-auth.test.js     # Admin authentication tests (P0/P1)
+├── webhook-hmac.test.js   # Webhook signature and dedup tests (P0/P1)
+├── views.test.js          # HTML rendering helpers tests (P2)
+├── error-handler.test.js  # Error monitoring tests (P2)
+└── edge-cases.test.js     # Edge cases and storage atomicity tests (P2)
 ```
 
 ### Tech Stack
@@ -223,7 +238,8 @@ views/
 | Database | SQLite via better-sqlite3 (WAL mode) |
 | Email | Nodemailer 8.x |
 | Shopify API | Admin GraphQL API (2026-01) |
-| CI | GitHub Actions (Node 20/22, ESLint, npm audit) |
+| Testing | Vitest 4.x + supertest + MSW |
+| CI | GitHub Actions (Node 20/22, ESLint, npm audit, tests) |
 
 ### Database
 
@@ -382,6 +398,20 @@ Strict-Transport-Security: max-age=31536000; includeSubDomains  (when HTTPS)
 
 ## Deployment
 
+### Docker
+
+```bash
+# Production build and run
+docker compose up -d
+
+# Development with local Mailpit SMTP (catches all email)
+docker compose --profile dev up -d
+# Mailpit web UI: http://localhost:8025
+# SMTP: localhost:1025
+```
+
+The Dockerfile uses a multi-stage build (Node 20 Alpine) with a non-root user, health check, and persistent volume for the SQLite database.
+
 ### Railway / Render
 
 1. Connect your GitHub repository
@@ -438,7 +468,40 @@ WantedBy=multi-user.target
 The SQLite database is stored at `DATA_DIR/cancel-requests.db`. Ensure this directory:
 - Is on persistent storage (not ephemeral container filesystem)
 - Has write permissions for the app process
-- Is backed up regularly
+- Is backed up regularly (see [Database Backups](#database-backups))
+
+### Database Backups
+
+The included backup script creates consistent, hot backups without stopping the app:
+
+```bash
+# Manual backup
+npm run backup
+
+# With custom settings
+DATA_DIR=/app/data BACKUP_DIR=/mnt/backups BACKUP_RETENTION_DAYS=14 ./scripts/backup-db.sh
+
+# Cron job (daily at 03:00)
+0 3 * * * /opt/shopify-cancel-app/scripts/backup-db.sh >> /var/log/backup.log 2>&1
+```
+
+The script uses SQLite's `VACUUM INTO` for a consistent snapshot, compresses with gzip, verifies integrity, and auto-cleans backups older than `BACKUP_RETENTION_DAYS` (default: 30).
+
+### Error Monitoring
+
+The app includes a pluggable error monitoring integration. To enable Sentry:
+
+```bash
+npm install @sentry/node
+# Add to .env:
+SENTRY_DSN=https://examplePublicKey@o0.ingest.sentry.io/0
+SENTRY_TRACES_SAMPLE_RATE=0.1
+```
+
+Without `SENTRY_DSN`, all errors are still captured via the structured JSON logger. The integration automatically:
+- Scrubs sensitive headers (Authorization, Cookie) before sending to external services
+- Catches unhandled rejections and uncaught exceptions
+- Provides an Express error-handling middleware for route errors
 
 ### Graceful Shutdown
 
@@ -497,13 +560,35 @@ Morgan (`combined` format) logs every HTTP request to stdout.
 
 ## Testing
 
+### Automated Tests
+
+```bash
+# Run all tests (92 tests across 7 test files)
+npm test
+
+# Watch mode for development
+npm run test:watch
+
+# Coverage report
+npm run test:coverage
+```
+
+**Test suites:**
+- **cancel-flow** — Form CSRF, App Proxy HMAC, input validation, cancellation flow, duplicate prevention
+- **refund-flow** — Refund approval/denial, atomic state transitions, webhook-driven sync
+- **admin-auth** — Bearer token auth, session auth, login/logout, rate limiting, open redirect prevention
+- **webhook-hmac** — HMAC verification, deduplication, timing safety
+- **views** — HTML rendering helpers (tables, badges, pagination, XSS prevention)
+- **error-handler** — Error capture, Express error middleware
+- **edge-cases** — Token expiry/reuse, admin pagination, settings validation, storage atomicity
+
 ### Manual Testing Flow
 
 #### 1. Health Check
 
 ```bash
 curl http://localhost:3000/health
-# Expected: {"ok":true,"version":"0.9.0"}
+# Expected: {"ok":true,"version":"0.12.0"}
 ```
 
 #### 2. Cancellation Form
@@ -579,6 +664,7 @@ The GitHub Actions CI runs on every push/PR to `main`:
 1. **Matrix test** — Node.js 20 and 22
 2. **Security audit** — `npm audit --audit-level=high`
 3. **Linting** — ESLint with ES2022 rules
+4. **Tests** — Full Vitest suite (92 tests)
 
 ---
 

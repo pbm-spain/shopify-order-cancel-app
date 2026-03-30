@@ -23,9 +23,11 @@ import {
 import { sendConfirmationEmail } from './email.js';
 import { rateLimit } from './rateLimit.js';
 import { csrfGenerate, csrfValidate } from './csrf.js';
-import { requireAdmin, adminLogin, adminLogout } from './adminAuth.js';
+import { requireAdmin, adminLogin, adminLogout, adminCsrfGenerate, adminCsrfValidate } from './adminAuth.js';
+import { buildStatusCheckboxes, buildPendingTable, buildRecentTable, buildPagination } from './views.js';
 import { logger, auditLog } from './logger.js';
 import { verifyWebhookSignature, handleOrderUpdated, handleOrderCancelled, handleRefundCreated } from './webhooks.js';
+import { expressErrorHandler } from './errorHandler.js';
 import morgan from 'morgan';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -167,7 +169,7 @@ app.get('/health', (_req, res) => {
     const db = getDb();
     // Execute a simple query to verify database connectivity
     db.prepare('SELECT 1').get();
-    res.json({ ok: true, version: '0.11.0' });
+    res.json({ ok: true, version: '0.12.0' });
   } catch (error) {
     logger.error('Health check failed', { error: error.message });
     res.status(503).json({ ok: false, error: 'Database unavailable' });
@@ -459,74 +461,6 @@ app.post('/webhooks/refunds/create', async (req, res) => {
 app.post('/admin/login', adminLoginRateLimit, adminLogin);
 app.get('/admin/logout', adminLogout);
 
-// ─── Admin CSRF token (Fix #2-4: simplified session-based approach) ───
-// Maps session IDs to their CSRF tokens (session data stored here)
-const adminSessions = new Map();
-
-// Cleanup expired sessions every 10 minutes
-// Fix #38: Store interval reference so it can be stopped during shutdown
-const adminSessionCleanupInterval = setInterval(() => {
-  try {
-    const now = Date.now();
-    const maxAge = 8 * 60 * 60 * 1000;
-    for (const [sessionId, { createdAt }] of adminSessions) {
-      if (now - createdAt > maxAge) {
-        adminSessions.delete(sessionId);
-      }
-    }
-  } catch { /* cleanup failure is non-fatal */ }
-}, 10 * 60 * 1000);
-adminSessionCleanupInterval.unref();
-
-function adminCsrfGenerate(req, res, next) {
-  // Fix #47: Reuse existing CSRF token for the session instead of regenerating
-  // on every page load. Regenerating caused stale-token errors when admins had
-  // multiple tabs or refreshed while a form was open.
-  const sessionId = req.cookies?._admin_session_id || crypto.randomBytes(16).toString('hex');
-
-  let session = adminSessions.get(sessionId);
-  if (!session || !session.csrfToken) {
-    // Only generate a new token when the session is new or missing a token
-    const csrfToken = crypto.randomBytes(32).toString('hex');
-    session = { csrfToken, createdAt: Date.now() };
-    adminSessions.set(sessionId, session);
-  }
-
-  res.cookie('_admin_session_id', sessionId, {
-    httpOnly: true,
-    sameSite: 'Strict',
-    secure: config.appBaseUrl.startsWith('https'),
-    maxAge: 8 * 60 * 60 * 1000,
-  });
-
-  res.locals.adminCsrfToken = session.csrfToken;
-  next();
-}
-
-function adminCsrfValidate(req, res, next) {
-  const sessionId = req.cookies?._admin_session_id || '';
-  const bodyToken = req.body?._csrf || '';
-
-  if (!sessionId || !bodyToken) {
-    return res.redirect('/admin?msg=Invalid CSRF token. Please reload the page.&type=error');
-  }
-
-  // Verify session exists and token matches
-  const session = adminSessions.get(sessionId);
-  if (!session) {
-    return res.redirect('/admin?msg=Invalid session. Please reload the page.&type=error');
-  }
-
-  // Timing-safe comparison to prevent timing attacks
-  const storedBuf = Buffer.from(String(session.csrfToken));
-  const bodyBuf = Buffer.from(String(bodyToken));
-  if (storedBuf.length !== bodyBuf.length || !crypto.timingSafeEqual(storedBuf, bodyBuf)) {
-    return res.redirect('/admin?msg=Invalid CSRF token. Please reload the page.&type=error');
-  }
-
-  next();
-}
-
 // ─── Admin Dashboard ─────────────────────────────────────────────────
 
 app.get('/admin', requireAdmin, adminCsrfGenerate, (_req, res) => {
@@ -750,104 +684,7 @@ app.post('/admin/refund/deny', requireAdmin, adminCsrfValidate, async (req, res)
   }
 });
 
-// ═══════════════════════════════════════════════════════════════════════
-// HELPERS
-// ═══════════════════════════════════════════════════════════════════════
-
-function buildStatusCheckboxes(allStatuses, allowed, groupName) {
-  return allStatuses.map((s) => {
-    const checked = allowed.includes(s.value) ? 'checked' : '';
-    return `<label class="cb-label">
-      <input type="checkbox" value="${s.value}" data-group="${groupName}" ${checked} />
-      <span class="cb-text">${escapeHtml(s.label)}</span>
-      <code class="cb-code">${s.value}</code>
-    </label>`;
-  }).join('\n');
-}
-
-function formatDate(iso) {
-  if (!iso) return '—';
-  return new Date(iso).toLocaleString('en-US', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-}
-
-function refundBadge(status) {
-  const map = {
-    none: '',
-    pending_approval: '<span class="status-badge badge-pending">Pending</span>',
-    approved: '<span class="status-badge badge-approved">Approved</span>',
-    denied: '<span class="status-badge badge-denied">Denied</span>',
-    auto_refunded: '<span class="status-badge badge-auto">Automatic</span>',
-    error: '<span class="status-badge badge-denied">Error</span>',
-  };
-  return map[status] || escapeHtml(String(status));
-}
-
-function buildPagination(tableType, result) {
-  const { page, totalPages } = result;
-
-  if (totalPages <= 1) {
-    return '';
-  }
-
-  const prevDisabled = page === 1 ? 'disabled' : '';
-  const nextDisabled = page === totalPages ? 'disabled' : '';
-
-  // tableType is hardcoded at build time (either 'pending' or 'recent') and safe from injection
-  return `
-    <div class="pagination">
-      <button class="pagination-btn" onclick="goToPage(${Math.max(1, page - 1)}, '${tableType}')" ${prevDisabled}>
-        Previous
-      </button>
-      <span class="pagination-info">Page ${page} of ${totalPages}</span>
-      <button class="pagination-btn" onclick="goToPage(${Math.min(totalPages, page + 1)}, '${tableType}')" ${nextDisabled}>
-        Next
-      </button>
-    </div>
-  `;
-}
-
-function buildPendingTable(pending) {
-  if (pending.length === 0) {
-    return '<p class="empty">No pending refunds awaiting approval.</p>';
-  }
-  const rows = pending.map((r) => `
-    <tr>
-      <td><strong>${escapeHtml(r.orderNumber)}</strong></td>
-      <td>${escapeHtml(r.email)}</td>
-      <td>${formatDate(r.cancelledAt)}</td>
-      <td>
-        <button class="btn btn-approve" data-action="approve" data-id="${escapeHtml(r.id)}">Approve</button>
-        <button class="btn btn-deny" data-action="deny" data-id="${escapeHtml(r.id)}">Deny</button>
-      </td>
-    </tr>
-  `).join('');
-
-  return `<table>
-    <thead><tr><th>Order</th><th>Email</th><th>Cancelled</th><th>Actions</th></tr></thead>
-    <tbody>${rows}</tbody>
-  </table>`;
-}
-
-function buildRecentTable(recent) {
-  if (recent.length === 0) {
-    return '<p class="empty">No recent cancellations.</p>';
-  }
-  const rows = recent.map((r) => `
-    <tr>
-      <td><strong>${escapeHtml(r.orderNumber)}</strong></td>
-      <td>${escapeHtml(r.email)}</td>
-      <td>${formatDate(r.cancelledAt)}</td>
-      <td>${refundBadge(r.refundStatus)}</td>
-    </tr>
-  `).join('');
-
-  return `<table>
-    <thead><tr><th>Order</th><th>Email</th><th>Cancelled</th><th>Refund</th></tr></thead>
-    <tbody>${rows}</tbody>
-  </table>`;
-}
-
-// Expose for graceful shutdown in server.js
-export { adminSessionCleanupInterval };
+// Global error handler — must be the last middleware
+app.use(expressErrorHandler);
 
 export default app;

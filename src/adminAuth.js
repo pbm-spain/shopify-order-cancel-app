@@ -1,35 +1,51 @@
 /**
- * Admin authentication middleware.
+ * Admin authentication and CSRF middleware.
  *
  * Protects admin routes with a Bearer token defined in ADMIN_API_TOKEN env var.
  * For the HTML dashboard, uses opaque session tokens (NOT the raw API token)
  * stored server-side to prevent token leakage via cookies.
+ *
+ * Also manages per-session CSRF tokens for admin forms, consolidating all
+ * session state into a single Map to avoid scattered session stores.
  */
 
 import crypto from 'crypto';
 import { config } from './config.js';
 
 const ADMIN_COOKIE = '_admin_session';
+const CSRF_COOKIE = '_admin_session_id';
 
 /**
- * Server-side session store.
- * Maps opaque session token → { createdAt: number }
+ * Unified server-side session store.
+ * Maps opaque session token → { createdAt: number, ip: string }
  * In production with multiple instances, replace with Redis or DB-backed store.
  */
 const sessions = new Map();
 
-// Auto-cleanup expired sessions every 30 minutes
+/**
+ * Admin CSRF session store.
+ * Maps session IDs → { csrfToken: string, createdAt: number }
+ * Kept as a separate Map from auth sessions because they serve different cookies
+ * and have different lifecycles (auth sessions are per-login, CSRF sessions are
+ * per-browser-visit including Bearer-auth users who never log in).
+ */
+const csrfSessions = new Map();
+
 const SESSION_MAX_AGE_MS = 8 * 60 * 60 * 1000; // 8 hours
 let sessionCleanupInterval = null;
 
 export function startSessionCleanup() {
-  // Fix #29: Add .unref() to prevent keeping the process alive during shutdown
   sessionCleanupInterval = setInterval(() => {
     try {
       const now = Date.now();
       for (const [token, session] of sessions) {
         if (now - session.createdAt > SESSION_MAX_AGE_MS) {
           sessions.delete(token);
+        }
+      }
+      for (const [sessionId, { createdAt }] of csrfSessions) {
+        if (now - createdAt > SESSION_MAX_AGE_MS) {
+          csrfSessions.delete(sessionId);
         }
       }
     } catch { /* cleanup failure is non-fatal */ }
@@ -135,6 +151,60 @@ function safeCompare(a, b) {
   const bufB = Buffer.from(String(b));
   if (bufA.length !== bufB.length) return false;
   return crypto.timingSafeEqual(bufA, bufB);
+}
+
+// ─── Admin CSRF middleware ───────────────────────────────────────────
+
+/**
+ * Generate or reuse a CSRF token for the admin session.
+ * Reuses existing token for the session instead of regenerating on every page
+ * load — prevents stale-token errors with multiple tabs or refresh.
+ */
+export function adminCsrfGenerate(req, res, next) {
+  const sessionId = req.cookies?.[CSRF_COOKIE] || crypto.randomBytes(16).toString('hex');
+
+  let session = csrfSessions.get(sessionId);
+  if (!session || !session.csrfToken) {
+    const csrfToken = crypto.randomBytes(32).toString('hex');
+    session = { csrfToken, createdAt: Date.now() };
+    csrfSessions.set(sessionId, session);
+  }
+
+  res.cookie(CSRF_COOKIE, sessionId, {
+    httpOnly: true,
+    sameSite: 'Strict',
+    secure: config.appBaseUrl.startsWith('https'),
+    maxAge: SESSION_MAX_AGE_MS,
+  });
+
+  res.locals.adminCsrfToken = session.csrfToken;
+  next();
+}
+
+/**
+ * Validate a CSRF token from the admin session.
+ * Uses timing-safe comparison to prevent timing attacks.
+ */
+export function adminCsrfValidate(req, res, next) {
+  const sessionId = req.cookies?.[CSRF_COOKIE] || '';
+  const bodyToken = req.body?._csrf || '';
+
+  if (!sessionId || !bodyToken) {
+    return res.redirect('/admin?msg=Invalid CSRF token. Please reload the page.&type=error');
+  }
+
+  const session = csrfSessions.get(sessionId);
+  if (!session) {
+    return res.redirect('/admin?msg=Invalid session. Please reload the page.&type=error');
+  }
+
+  const storedBuf = Buffer.from(String(session.csrfToken));
+  const bodyBuf = Buffer.from(String(bodyToken));
+  if (storedBuf.length !== bodyBuf.length || !crypto.timingSafeEqual(storedBuf, bodyBuf)) {
+    return res.redirect('/admin?msg=Invalid CSRF token. Please reload the page.&type=error');
+  }
+
+  next();
 }
 
 function loginPage(redirect = '/admin', error = '', nonce = '') {

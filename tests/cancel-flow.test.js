@@ -35,7 +35,7 @@ describe('Health Endpoint', () => {
     const res = await request(app).get('/health');
 
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ ok: true, version: '0.11.0' });
+    expect(res.body).toEqual({ ok: true, version: '0.12.0' });
   });
 });
 
