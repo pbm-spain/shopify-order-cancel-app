@@ -17,7 +17,6 @@ import {
   markEmailSent,
   incrementEmailAttempt,
   getFailedEmails,
-  findRequestById,
   updateTokenHash,
 } from './storage.js';
 import { sendConfirmationEmail } from './email.js';

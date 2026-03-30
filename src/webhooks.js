@@ -21,7 +21,6 @@ import crypto from 'crypto';
 import { config } from './config.js';
 import { logger, auditLog } from './logger.js';
 import {
-  findRequestByTokenHash,
   updateRequest,
   findPendingRequestForOrder,
   tryMarkWebhookProcessed,
