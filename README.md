@@ -415,7 +415,17 @@ docker exec shopify-cancel-app curl -f http://localhost:3000/health
 
 The app starts on port 3000 by default. The container is named `shopify-cancel-app` for easy reference in `docker exec` commands.
 
-#### 4. Verify
+#### 4. Stop the Application
+
+```bash
+# Stop and remove the container (data volume is preserved)
+docker compose down
+
+# Stop without removing (can restart with docker compose start)
+docker compose stop
+```
+
+#### 5. Verify
 
 ```bash
 curl http://localhost:3000/health
@@ -766,7 +776,10 @@ docker exec shopify-cancel-app sqlite3 /app/data/cancel-requests.db "SELECT * FR
 ### Viewing Logs
 
 ```bash
-# Follow logs in real-time
+# Follow logs in real-time (docker compose)
+docker compose logs -f
+
+# Follow logs for the app container only
 docker logs -f shopify-cancel-app
 
 # Last 100 lines
