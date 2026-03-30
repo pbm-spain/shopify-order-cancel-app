@@ -13,6 +13,7 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 import { logger } from './logger.js';
 
 const dataDir = process.env.DATA_DIR || path.join(process.cwd(), 'data');
@@ -560,6 +561,7 @@ export function cleanupOldWebhookEvents(olderThanDays = 30) {
 /**
  * Log a webhook processing attempt (Fix #47).
  * Records detailed webhook activity for monitoring and debugging.
+ * Uses UUID for ID to prevent collision on rapid deliveries.
  */
 const logWebhookProcessingStmt = db.prepare(`
   INSERT INTO webhook_processing_log (id, webhook_id, topic, status, error_message, payload_summary, attempt_count, created_at, updated_at)
@@ -568,7 +570,8 @@ const logWebhookProcessingStmt = db.prepare(`
 
 export function logWebhookProcessing(webhookId, topic, status, errorMessage = null, payloadSummary = null) {
   const now = new Date().toISOString();
-  const id = `${webhookId}-${Date.now()}`;
+  // Use crypto.randomUUID() for collision-free ID generation
+  const id = crypto.randomUUID();
   logWebhookProcessingStmt.run({
     id,
     webhookId,
