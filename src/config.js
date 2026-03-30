@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import crypto from 'crypto';
 
 function env(name, fallback = undefined) {
   const value = process.env[name] ?? fallback;
@@ -6,6 +7,10 @@ function env(name, fallback = undefined) {
     throw new Error(`Missing environment variable: ${name}`);
   }
   return value;
+}
+
+function hashToken(token) {
+  return crypto.createHash('sha256').update(token).digest('hex');
 }
 
 function envPort(name, fallback) {
@@ -60,7 +65,8 @@ export const config = {
   rateLimitMaxRequests: envPositiveInt('RATE_LIMIT_MAX_REQUESTS', 5),
 
   // Admin panel
-  adminApiToken: env('ADMIN_API_TOKEN'),
+  // Hash the token at startup to protect against memory dumps
+  adminApiToken: hashToken(env('ADMIN_API_TOKEN')),
 
   // Logging
   logLevel: process.env.LOG_LEVEL || 'info',

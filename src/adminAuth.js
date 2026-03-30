@@ -12,6 +12,10 @@
 import crypto from 'crypto';
 import { config } from './config.js';
 
+function hashToken(token) {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+
 const ADMIN_COOKIE = '_admin_session';
 const CSRF_COOKIE = '_admin_session_id';
 
@@ -69,7 +73,7 @@ export function requireAdmin(req, res, next) {
   const authHeader = req.headers.authorization || '';
   if (authHeader.startsWith('Bearer ')) {
     const token = authHeader.slice(7);
-    if (safeCompare(token, config.adminApiToken)) {
+    if (safeCompare(hashToken(token), config.adminApiToken)) {
       return next();
     }
   }
@@ -108,7 +112,7 @@ export function requireAdmin(req, res, next) {
  */
 export function adminLogin(req, res) {
   const { token } = req.body;
-  if (!token || !safeCompare(token, config.adminApiToken)) {
+  if (!token || !safeCompare(hashToken(token), config.adminApiToken)) {
     return res.status(401).send(loginPage(req.body.redirect || '/admin', 'Incorrect token.', res.locals.nonce));
   }
 
