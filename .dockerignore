@@ -1,0 +1,13 @@
+node_modules
+npm-debug.log
+.git
+.github
+.env
+.env.*
+!.env.example
+data/
+tests/
+vitest.config.js
+eslint.config.js
+*.md
+.claude/
