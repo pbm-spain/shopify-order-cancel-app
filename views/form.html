@@ -131,7 +131,7 @@
       <h1>Request Order Cancellation</h1>
       <p class="oc-intro">Enter the email address and order number associated with your purchase. We'll send you a confirmation email to complete the cancellation.</p>
 
-      <form method="post" action="/apps/order-cancel/request" id="cancelForm" novalidate>
+      <form method="post" action="/proxy/request" id="cancelForm" novalidate>
         <input type="hidden" name="_csrf" value="{{CSRF_TOKEN}}" />
 
         <div class="oc-field">
