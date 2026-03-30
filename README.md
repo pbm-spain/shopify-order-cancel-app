@@ -1,6 +1,7 @@
 # Shopify Order Cancel Confirmation App
 
 [![CI](https://github.com/pbm-spain/shopify-order-cancel-app/actions/workflows/ci.yml/badge.svg)](https://github.com/pbm-spain/shopify-order-cancel-app/actions/workflows/ci.yml)
+[![Docker Publish](https://github.com/pbm-spain/shopify-order-cancel-app/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/pbm-spain/shopify-order-cancel-app/actions/workflows/docker-publish.yml)
 
 A self-hosted Shopify app that lets customers request order cancellations through a secure, email-confirmed workflow. The store owner retains full control over refund approvals via an admin dashboard.
 
@@ -400,6 +401,52 @@ Strict-Transport-Security: max-age=31536000; includeSubDomains  (when HTTPS)
 
 ### Docker
 
+#### Pre-built image from GitHub Container Registry
+
+The image is automatically built and published on every push to `main` (multi-platform: `linux/amd64` and `linux/arm64`).
+
+```bash
+# Pull the latest image
+docker pull ghcr.io/pbm-spain/shopify-order-cancel-app:latest
+
+# Or pull a specific commit
+docker pull ghcr.io/pbm-spain/shopify-order-cancel-app:sha-<full-commit-sha>
+
+# Run with an env file and persistent volume
+docker run -d \
+  --name shopify-cancel-app \
+  --env-file .env \
+  -e NODE_ENV=production \
+  -e DATA_DIR=/app/data \
+  -v cancel-app-data:/app/data \
+  -p 3000:3000 \
+  --restart unless-stopped \
+  ghcr.io/pbm-spain/shopify-order-cancel-app:latest
+```
+
+Or use the pre-built image in `docker-compose.yml`:
+
+```yaml
+services:
+  app:
+    image: ghcr.io/pbm-spain/shopify-order-cancel-app:latest
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+      - DATA_DIR=/app/data
+    volumes:
+      - app-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  app-data:
+```
+
+#### Build locally
+
 ```bash
 # Production build and run
 docker compose up -d
@@ -665,6 +712,14 @@ The GitHub Actions CI runs on every push/PR to `main`:
 2. **Security audit** — `npm audit --audit-level=high`
 3. **Linting** — ESLint with ES2022 rules
 4. **Tests** — Full Vitest suite (92 tests)
+
+### Docker Publish Pipeline
+
+On every push to `main`, the Docker Publish workflow:
+
+1. Builds a multi-platform image (`linux/amd64`, `linux/arm64`)
+2. Pushes to `ghcr.io/pbm-spain/shopify-order-cancel-app` tagged as `latest` and `sha-<commit>`
+3. Uses GitHub Actions cache for faster builds
 
 ---
 
