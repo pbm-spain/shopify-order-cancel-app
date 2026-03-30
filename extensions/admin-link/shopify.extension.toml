@@ -1,0 +1,7 @@
+type = "admin_link"
+name = "Order Cancellation Settings"
+handle = "order-cancel-settings"
+
+[[targets]]
+target = "admin.order-details.action.menu"
+url = "/admin?order={{resourceId}}"

@@ -189,6 +189,14 @@ Or use Liquid on the order status page:
 </a>
 ```
 
+### 6. Admin Link Extension (Optional)
+
+To allow store owners to access the admin dashboard directly from the Shopify admin, an admin link extension is included in the `extensions/admin-link/` directory.
+
+Once deployed, the admin will see an "Order Cancellation Settings" link in the More actions menu on order details pages in Shopify Admin. This link directs to `https://your-app.example.com/admin`.
+
+**Note:** Admin link extensions are a Shopify platform feature (API v2025-01+). If your store doesn't support this feature, store owners can still access the dashboard at `https://your-app.example.com/admin` directly. The extension will be ignored on older API versions without causing errors.
+
 ---
 
 ## Architecture

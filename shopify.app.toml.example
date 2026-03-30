@@ -18,3 +18,8 @@ redirect_urls = [
 url = "/proxy"
 prefix = "apps"
 subpath = "order-cancel"
+
+# Admin link extension: Adds a link to the order details action menu
+# The extension is defined in extensions/admin-link/shopify.extension.toml
+# Once deployed, store owners will see "Order Cancellation Settings" link in the
+# More actions menu on the Shopify order details page, linking to the admin dashboard
