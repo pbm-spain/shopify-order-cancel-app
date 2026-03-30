@@ -75,6 +75,24 @@ db.exec(`
   );
 
   CREATE INDEX IF NOT EXISTS idx_webhook_received_at ON webhook_events(received_at);
+
+  -- Webhook processing log (Fix #47: detailed webhook tracking)
+  CREATE TABLE IF NOT EXISTS webhook_processing_log (
+    id TEXT PRIMARY KEY,
+    webhook_id TEXT NOT NULL,
+    topic TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('succeeded', 'failed', 'skipped')),
+    error_message TEXT,
+    payload_summary TEXT,
+    attempt_count INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_webhook_processing_webhook_id ON webhook_processing_log(webhook_id);
+  CREATE INDEX IF NOT EXISTS idx_webhook_processing_topic ON webhook_processing_log(topic);
+  CREATE INDEX IF NOT EXISTS idx_webhook_processing_status ON webhook_processing_log(status);
+  CREATE INDEX IF NOT EXISTS idx_webhook_processing_created_at ON webhook_processing_log(created_at DESC);
 `);
 
 // Ensure default admin settings exist
@@ -537,6 +555,96 @@ export function cleanupOldWebhookEvents(olderThanDays = 30) {
     olderThanDays,
   });
   return result;
+}
+
+/**
+ * Log a webhook processing attempt (Fix #47).
+ * Records detailed webhook activity for monitoring and debugging.
+ */
+const logWebhookProcessingStmt = db.prepare(`
+  INSERT INTO webhook_processing_log (id, webhook_id, topic, status, error_message, payload_summary, attempt_count, created_at, updated_at)
+  VALUES (@id, @webhookId, @topic, @status, @errorMessage, @payloadSummary, @attemptCount, @createdAt, @updatedAt)
+`);
+
+export function logWebhookProcessing(webhookId, topic, status, errorMessage = null, payloadSummary = null) {
+  const now = new Date().toISOString();
+  const id = `${webhookId}-${Date.now()}`;
+  logWebhookProcessingStmt.run({
+    id,
+    webhookId,
+    topic,
+    status,
+    errorMessage,
+    payloadSummary,
+    attemptCount: 1,
+    createdAt: now,
+    updatedAt: now,
+  });
+}
+
+/**
+ * Get failed webhooks (status = 'failed') with pagination.
+ */
+const getFailedWebhooksStmt = db.prepare(`
+  SELECT * FROM webhook_processing_log
+  WHERE status = 'failed'
+  ORDER BY created_at DESC
+  LIMIT ? OFFSET ?
+`);
+
+const countFailedWebhooksStmt = db.prepare(`
+  SELECT COUNT(*) as cnt FROM webhook_processing_log WHERE status = 'failed'
+`);
+
+export function getFailedWebhooks(page = 1, pageSize = 25) {
+  const offset = (page - 1) * pageSize;
+  const total = countFailedWebhooksStmt.get().cnt || 0;
+  const data = getFailedWebhooksStmt.all(pageSize, offset);
+  const totalPages = Math.ceil(total / pageSize);
+  return { data, total, page, pageSize, totalPages };
+}
+
+/**
+ * Get a specific failed webhook by webhook_id (most recent attempt).
+ */
+const getFailedWebhookByIdStmt = db.prepare(`
+  SELECT * FROM webhook_processing_log
+  WHERE webhook_id = ? AND status = 'failed'
+  ORDER BY created_at DESC
+  LIMIT 1
+`);
+
+export function getFailedWebhookById(webhookId) {
+  return getFailedWebhookByIdStmt.get(webhookId);
+}
+
+/**
+ * Clean up old webhook processing logs (>30 days).
+ */
+export function cleanupOldWebhookProcessingLogs(olderThanDays = 30) {
+  const cutoffDate = new Date(Date.now() - olderThanDays * 24 * 60 * 60 * 1000).toISOString();
+  const stmt = db.prepare('DELETE FROM webhook_processing_log WHERE created_at < ?');
+  const result = stmt.run(cutoffDate);
+  logger.info('Webhook processing log cleanup completed', {
+    deletedCount: result.changes,
+    olderThanDays,
+  });
+  return result;
+}
+
+/**
+ * Find cancellations in cancel_submitted status that have been waiting >N hours (Fix #48).
+ * These are cancellations that didn't receive a completion webhook.
+ */
+const findStaleCancellationsStmt = db.prepare(`
+  SELECT * FROM cancel_requests
+  WHERE status = 'cancel_submitted' AND cancelled_at IS NOT NULL
+    AND datetime(cancelled_at) < datetime('now', '-' || ? || ' hours')
+  ORDER BY cancelled_at ASC
+`);
+
+export function findStaleCancellations(thresholdHours = 24) {
+  return findStaleCancellationsStmt.all(thresholdHours).map(rowToRecord);
 }
 
 /**

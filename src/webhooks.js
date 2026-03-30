@@ -25,6 +25,7 @@ import {
   findPendingRequestForOrder,
   tryMarkWebhookProcessed,
   getAllowedFulfillmentStatuses,
+  logWebhookProcessing,
 } from './storage.js';
 
 /**
@@ -111,21 +112,49 @@ export function verifyWebhookSignature(req) {
  * - cancelled_at: ISO 8601 string or null
  */
 export async function handleOrderUpdated(req, res) {
-  try {
-    const webhookId = req.get('X-Shopify-Webhook-Id');
+  const webhookId = req.get('X-Shopify-Webhook-Id');
+  const topic = req.get('X-Shopify-Topic') || 'orders/updated';
 
-    // Fix #46: Atomic check-and-insert deduplication (replaces TOCTTOU check-then-mark).
+  try {
+    // Fix #47: Parse and validate BEFORE marking as processed.
+    // If JSON.parse fails, we don't mark webhook as processed, allowing retry.
+    let body;
+    try {
+      body = JSON.parse(req.rawBody);
+    } catch (parseError) {
+      logger.error('Failed to parse webhook JSON', {
+        error: parseError.message,
+        webhookId,
+        topic,
+        traceId: req.traceId,
+      });
+      if (webhookId) {
+        logWebhookProcessing(webhookId, topic, 'failed', `JSON parse error: ${parseError.message}`);
+      }
+      return res.status(400).json({ error: 'Invalid JSON payload' });
+    }
+
+    const numericId = body.id;
+    if (!numericId) {
+      logger.error('Webhook payload missing order id', {
+        webhookId,
+        topic,
+        traceId: req.traceId,
+      });
+      if (webhookId) {
+        logWebhookProcessing(webhookId, topic, 'failed', 'Missing order id in payload');
+      }
+      return res.status(400).json({ error: 'Invalid webhook payload' });
+    }
+
+    // Fix #46: NOW mark webhook as processed (after validation).
     // tryMarkWebhookProcessed returns false if the webhook was already processed.
     if (webhookId && !tryMarkWebhookProcessed(webhookId)) {
       logger.debug('Webhook already processed, skipping', { webhookId, traceId: req.traceId });
+      if (webhookId) {
+        logWebhookProcessing(webhookId, topic, 'skipped', null, JSON.stringify({ orderId: numericId }));
+      }
       return res.json({ ok: true });
-    }
-
-    const body = JSON.parse(req.rawBody);
-    const numericId = body.id;
-
-    if (!numericId) {
-      return res.status(400).json({ error: 'Invalid webhook payload' });
     }
 
     // Convert REST numeric ID to GraphQL GID for database lookup (Fix #21)
@@ -140,6 +169,9 @@ export async function handleOrderUpdated(req, res) {
         orderGid,
         traceId: req.traceId,
       });
+      if (webhookId) {
+        logWebhookProcessing(webhookId, topic, 'succeeded', null, JSON.stringify({ orderId: numericId, hasPending: false }));
+      }
       return res.json({ ok: true });
     }
 
@@ -152,6 +184,9 @@ export async function handleOrderUpdated(req, res) {
         orderId: numericId,
         traceId: req.traceId,
       });
+      if (webhookId) {
+        logWebhookProcessing(webhookId, topic, 'succeeded', null, JSON.stringify({ orderId: numericId, action: 'order_already_cancelled' }));
+      }
       return res.json({ ok: true });
     }
 
@@ -183,12 +218,20 @@ export async function handleOrderUpdated(req, res) {
       });
     }
 
+    if (webhookId) {
+      logWebhookProcessing(webhookId, topic, 'succeeded', null, JSON.stringify({ orderId: numericId, action: 'order_updated' }));
+    }
     return res.json({ ok: true });
   } catch (error) {
     logger.error('Failed to handle orders/updated webhook', {
       error: error.message,
+      webhookId,
+      topic,
       traceId: req.traceId,
     });
+    if (webhookId) {
+      logWebhookProcessing(webhookId, topic, 'failed', `Exception: ${error.message}`);
+    }
     // Return 200 OK to prevent Shopify from retrying indefinitely
     return res.json({ ok: false, error: error.message });
   }
@@ -204,24 +247,51 @@ export async function handleOrderUpdated(req, res) {
  * - cancelled_at: ISO 8601 string
  */
 export async function handleOrderCancelled(req, res) {
-  try {
-    const webhookId = req.get('X-Shopify-Webhook-Id');
+  const webhookId = req.get('X-Shopify-Webhook-Id');
+  const topic = req.get('X-Shopify-Topic') || 'orders/cancelled';
 
-    // Fix #46: Atomic check-and-insert deduplication (replaces TOCTTOU check-then-mark).
-    // tryMarkWebhookProcessed returns false if the webhook was already processed.
-    if (webhookId && !tryMarkWebhookProcessed(webhookId)) {
-      logger.debug('Webhook already processed, skipping', { webhookId, traceId: req.traceId });
-      return res.json({ ok: true });
+  try {
+    // Fix #47: Parse and validate BEFORE marking as processed.
+    let body;
+    try {
+      body = JSON.parse(req.rawBody);
+    } catch (parseError) {
+      logger.error('Failed to parse webhook JSON', {
+        error: parseError.message,
+        webhookId,
+        topic,
+        traceId: req.traceId,
+      });
+      if (webhookId) {
+        logWebhookProcessing(webhookId, topic, 'failed', `JSON parse error: ${parseError.message}`);
+      }
+      return res.status(400).json({ error: 'Invalid JSON payload' });
     }
 
-    const body = JSON.parse(req.rawBody);
     const numericId = body.id;
     const name = body.name;
     // REST uses snake_case (Fix #21)
     const cancelledAt = body.cancelled_at;
 
     if (!numericId) {
+      logger.error('Webhook payload missing order id', {
+        webhookId,
+        topic,
+        traceId: req.traceId,
+      });
+      if (webhookId) {
+        logWebhookProcessing(webhookId, topic, 'failed', 'Missing order id in payload');
+      }
       return res.status(400).json({ error: 'Invalid webhook payload' });
+    }
+
+    // Fix #46: NOW mark webhook as processed (after validation).
+    if (webhookId && !tryMarkWebhookProcessed(webhookId)) {
+      logger.debug('Webhook already processed, skipping', { webhookId, traceId: req.traceId });
+      if (webhookId) {
+        logWebhookProcessing(webhookId, topic, 'skipped', null, JSON.stringify({ orderId: numericId }));
+      }
+      return res.json({ ok: true });
     }
 
     // Convert REST numeric ID to GraphQL GID for database lookup (Fix #21)
@@ -237,6 +307,9 @@ export async function handleOrderCancelled(req, res) {
         orderName: name,
         traceId: req.traceId,
       });
+      if (webhookId) {
+        logWebhookProcessing(webhookId, topic, 'succeeded', null, JSON.stringify({ orderId: numericId, hasPending: false }));
+      }
       return res.json({ ok: true });
     }
 
@@ -259,12 +332,20 @@ export async function handleOrderCancelled(req, res) {
       traceId: req.traceId,
     });
 
+    if (webhookId) {
+      logWebhookProcessing(webhookId, topic, 'succeeded', null, JSON.stringify({ orderId: numericId, action: 'cancelled_externally' }));
+    }
     return res.json({ ok: true });
   } catch (error) {
     logger.error('Failed to handle orders/cancelled webhook', {
       error: error.message,
+      webhookId,
+      topic,
       traceId: req.traceId,
     });
+    if (webhookId) {
+      logWebhookProcessing(webhookId, topic, 'failed', `Exception: ${error.message}`);
+    }
     return res.json({ ok: false, error: error.message });
   }
 }
@@ -278,21 +359,48 @@ export async function handleOrderCancelled(req, res) {
  * - order_id: numeric order ID (already snake_case in REST)
  */
 export async function handleRefundCreated(req, res) {
-  try {
-    const webhookId = req.get('X-Shopify-Webhook-Id');
+  const webhookId = req.get('X-Shopify-Webhook-Id');
+  const topic = req.get('X-Shopify-Topic') || 'refunds/create';
 
-    // Fix #46: Atomic check-and-insert deduplication (replaces TOCTTOU check-then-mark).
-    // tryMarkWebhookProcessed returns false if the webhook was already processed.
-    if (webhookId && !tryMarkWebhookProcessed(webhookId)) {
-      logger.debug('Webhook already processed, skipping', { webhookId, traceId: req.traceId });
-      return res.json({ ok: true });
+  try {
+    // Fix #47: Parse and validate BEFORE marking as processed.
+    let body;
+    try {
+      body = JSON.parse(req.rawBody);
+    } catch (parseError) {
+      logger.error('Failed to parse webhook JSON', {
+        error: parseError.message,
+        webhookId,
+        topic,
+        traceId: req.traceId,
+      });
+      if (webhookId) {
+        logWebhookProcessing(webhookId, topic, 'failed', `JSON parse error: ${parseError.message}`);
+      }
+      return res.status(400).json({ error: 'Invalid JSON payload' });
     }
 
-    const body = JSON.parse(req.rawBody);
     const { id: refundId, order_id: numericOrderId } = body;
 
     if (!refundId || !numericOrderId) {
+      logger.error('Webhook payload missing refund id or order id', {
+        webhookId,
+        topic,
+        traceId: req.traceId,
+      });
+      if (webhookId) {
+        logWebhookProcessing(webhookId, topic, 'failed', 'Missing refund id or order id in payload');
+      }
       return res.status(400).json({ error: 'Invalid webhook payload' });
+    }
+
+    // Fix #46: NOW mark webhook as processed (after validation).
+    if (webhookId && !tryMarkWebhookProcessed(webhookId)) {
+      logger.debug('Webhook already processed, skipping', { webhookId, traceId: req.traceId });
+      if (webhookId) {
+        logWebhookProcessing(webhookId, topic, 'skipped', null, JSON.stringify({ refundId, orderId: numericOrderId }));
+      }
+      return res.json({ ok: true });
     }
 
     // Convert REST numeric ID to GraphQL GID for database lookup (Fix #21)
@@ -308,6 +416,9 @@ export async function handleRefundCreated(req, res) {
         orderGid,
         traceId: req.traceId,
       });
+      if (webhookId) {
+        logWebhookProcessing(webhookId, topic, 'succeeded', null, JSON.stringify({ refundId, orderId: numericOrderId, hasPending: false }));
+      }
       return res.json({ ok: true });
     }
 
@@ -333,12 +444,20 @@ export async function handleRefundCreated(req, res) {
       });
     }
 
+    if (webhookId) {
+      logWebhookProcessing(webhookId, topic, 'succeeded', null, JSON.stringify({ refundId, orderId: numericOrderId, action: 'refund_detected' }));
+    }
     return res.json({ ok: true });
   } catch (error) {
     logger.error('Failed to handle refunds/create webhook', {
       error: error.message,
+      webhookId,
+      topic,
       traceId: req.traceId,
     });
+    if (webhookId) {
+      logWebhookProcessing(webhookId, topic, 'failed', `Exception: ${error.message}`);
+    }
     return res.json({ ok: false, error: error.message });
   }
 }

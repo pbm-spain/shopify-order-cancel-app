@@ -68,6 +68,9 @@ export const config = {
   // Hash the token at startup to protect against memory dumps
   adminApiToken: hashToken(env('ADMIN_API_TOKEN')),
 
+  // Shopify API key for embedding support (optional)
+  shopifyApiKey: process.env.SHOPIFY_API_KEY || '',
+
   // Logging
   logLevel: process.env.LOG_LEVEL || 'info',
 

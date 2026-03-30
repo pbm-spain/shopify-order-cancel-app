@@ -18,7 +18,7 @@ import {
   updateRefundById, atomicUpdateRefundById, isAutoRefundEnabled,
   getAllowedFulfillmentStatuses, getAllowedFinancialStatuses,
   setSetting, getPendingRefundsPaginated, getRecentCancellationsPaginated,
-  markEmailSent, getDb,
+  markEmailSent, getDb, getFailedWebhooks, getFailedWebhookById, findStaleCancellations,
 } from './storage.js';
 import { sendConfirmationEmail } from './email.js';
 import { rateLimit } from './rateLimit.js';
@@ -55,6 +55,8 @@ app.use((req, res, next) => {
 // ─── Security headers with CSP nonces (Fix #17) ────────────────────
 // Fix #1: Skip X-Frame-Options and CSP for proxy routes so Shopify can embed
 // the response in the theme. Shopify App Proxy requires framing to work.
+// Support dynamic CSP for embedded admin: when ?shop= or ?embedded=1 is present,
+// allow framing from Shopify Admin by setting appropriate frame-ancestors.
 
 app.use((_req, res, next) => {
   const nonce = crypto.randomBytes(16).toString('hex');
@@ -63,21 +65,48 @@ app.use((_req, res, next) => {
   // Check if this is a proxy route (GET /proxy or POST /proxy/*)
   const isProxyRoute = _req.path === '/proxy' || _req.path.startsWith('/proxy/');
 
+  // Check if this is an embedded admin request (indicated by ?shop= or ?embedded=1 query param)
+  const isEmbeddedAdmin = _req.path === '/admin' && (_req.query.shop || _req.query.embedded === '1');
+
   res.setHeader('X-Content-Type-Options', 'nosniff');
 
-  // Skip X-Frame-Options for proxy routes (Shopify needs to frame the response in theme)
+  // Handle X-Frame-Options
   if (!isProxyRoute) {
-    res.setHeader('X-Frame-Options', 'DENY');
+    if (isEmbeddedAdmin) {
+      // Allow framing when embedded in Shopify Admin
+      // Don't set X-Frame-Options — the CSP frame-ancestors will handle it
+    } else {
+      // Prevent framing for non-embedded routes
+      res.setHeader('X-Frame-Options', 'DENY');
+    }
   }
 
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
 
-  // Skip CSP for proxy routes (Shopify strips CSP anyway for theme safety)
+  // Handle CSP
   if (!isProxyRoute) {
-    res.setHeader(
-      'Content-Security-Policy',
-      `default-src 'self'; script-src 'self' 'nonce-${nonce}'; style-src 'self' 'nonce-${nonce}' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com;`,
-    );
+    let csp;
+    if (isEmbeddedAdmin) {
+      // For embedded admin, allow framing from the shop domain and Shopify Admin
+      // SECURITY FIX #52: Validate shop domain against configured domain to prevent CSP injection
+      const shopDomain = String(_req.query.shop || config.shopDomain);
+      if (_req.query.shop && shopDomain !== config.shopDomain) {
+        // Reject invalid shop domain (prevents CSP breakout attacks)
+        logger.warn('Invalid shop domain in embedded admin request', {
+          requestedShop: shopDomain,
+          configuredShop: config.shopDomain,
+          ip: _req.ip,
+        });
+        // Use the configured shop domain instead of the untrusted parameter
+        // This ensures the CSP only allows framing from the correct shop
+      }
+      const trustedShopDomain = config.shopDomain;
+      csp = `default-src 'self'; script-src 'self' 'nonce-${nonce}' https://cdn.shopify.com; style-src 'self' 'nonce-${nonce}' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; frame-ancestors https://${trustedShopDomain} https://admin.shopify.com;`;
+    } else {
+      // For standalone admin, disallow framing
+      csp = `default-src 'self'; script-src 'self' 'nonce-${nonce}'; style-src 'self' 'nonce-${nonce}' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; frame-ancestors 'none';`;
+    }
+    res.setHeader('Content-Security-Policy', csp);
   }
 
   if (config.appBaseUrl.startsWith('https')) {
@@ -553,6 +582,8 @@ app.post('/admin/login', adminLoginRateLimit, adminLogin);
 app.get('/admin/logout', adminLogout);
 
 // ─── Admin Dashboard ─────────────────────────────────────────────────
+// Supports both standalone and embedded (Shopify Admin iframe) access.
+// When ?shop= or ?embedded=1 is present, injects App Bridge CDN for embedding support.
 
 app.get('/admin', requireAdmin, adminCsrfGenerate, (_req, res) => {
   const template = fs.readFileSync(path.join(__dirname, '..', 'views', 'admin.html'), 'utf8');
@@ -577,8 +608,16 @@ app.get('/admin', requireAdmin, adminCsrfGenerate, (_req, res) => {
     ? `<div class="flash ${flashType}">${escapeHtml(String(_req.query.msg))}</div>`
     : '';
 
+  // Build App Bridge CDN meta tag and script tag if API key is configured
+  let appBridgeTags = '';
+  if (config.shopifyApiKey) {
+    appBridgeTags = `<meta name="shopify-api-key" content="${escapeHtml(config.shopifyApiKey)}" />
+  <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>`;
+  }
+
   const html = template
     .replace(/\{\{NONCE\}\}/g, res.locals.nonce)
+    .replace('{{SHOPIFY_APP_BRIDGE}}', appBridgeTags)
     .replace('{{AUTO_REFUND_CHECKED}}', autoRefund ? 'checked' : '')
     .replace('{{PENDING_COUNT}}', String(pendingResult.total))
     .replace('{{FLASH_MESSAGE}}', flash)
@@ -772,6 +811,168 @@ app.post('/admin/refund/deny', requireAdmin, adminCsrfValidate, async (req, res)
     logger.error('Refund denial failed', { id, error: error.message });
     // Fix #48: Generic error message to avoid leaking API internals in URL.
     return res.redirect('/admin?msg=Error denying refund. Check server logs for details.&type=error');
+  }
+});
+
+// ─── Admin: webhook management (Fix #47: webhook resilience) ───────
+
+/**
+ * GET /admin/webhooks/list
+ * List failed webhooks with pagination
+ */
+app.get('/admin/webhooks/list', requireAdmin, (_req, res) => {
+  try {
+    const page = Math.max(1, parseInt(String(_req.query.page || '1'), 10));
+    const pageSize = 25;
+    const result = getFailedWebhooks(page, pageSize);
+
+    res.json({
+      ok: true,
+      data: result.data,
+      pagination: {
+        page: result.page,
+        pageSize: result.pageSize,
+        total: result.total,
+        totalPages: result.totalPages,
+      },
+    });
+  } catch (error) {
+    logger.error('Failed to list webhooks', { error: error.message, traceId: _req.traceId });
+    return res.status(500).json({ ok: false, error: 'Failed to list webhooks' });
+  }
+});
+
+/**
+ * POST /admin/webhooks/retry/:webhookId
+ * Retry a failed webhook by re-fetching order state from Shopify and reprocessing
+ */
+app.post('/admin/webhooks/retry/:webhookId', requireAdmin, async (req, res) => {
+  try {
+    const { webhookId } = req.params;
+
+    // Get the failed webhook record
+    const failedWebhook = getFailedWebhookById(webhookId);
+    if (!failedWebhook) {
+      return res.status(404).json({ ok: false, error: 'Webhook not found' });
+    }
+
+    // Parse the payload summary to extract order ID
+    let orderId;
+    try {
+      const summary = JSON.parse(failedWebhook.payload_summary || '{}');
+      orderId = summary.orderId;
+    } catch (e) {
+      logger.warn('Could not parse webhook payload summary', { webhookId });
+    }
+
+    if (!orderId) {
+      return res.status(400).json({ ok: false, error: 'Could not extract order ID from webhook' });
+    }
+
+    // Re-fetch current order state from Shopify
+    const currentOrder = await findOrderById(`gid://shopify/Order/${orderId}`);
+    if (!currentOrder) {
+      return res.status(400).json({ ok: false, error: 'Order no longer exists in Shopify' });
+    }
+
+    // Check for pending cancel request
+    const pending = findPendingRequestForOrder(`gid://shopify/Order/${orderId}`);
+    if (!pending) {
+      return res.json({
+        ok: true,
+        message: 'Webhook reprocessed, but no pending cancel request found for this order',
+      });
+    }
+
+    // Update the cancel request based on current order state
+    const cancelledAt = currentOrder.cancelledAt;
+    const fulfillmentStatus = currentOrder.displayFulfillmentStatus || 'UNFULFILLED';
+
+    if (cancelledAt) {
+      updateRequest(pending.tokenHash, {
+        status: 'cancelled_externally',
+        cancelledAt,
+      });
+      auditLog('webhook_retry_success', {
+        webhookId,
+        orderId,
+        action: 'order_cancelled',
+        traceId: req.traceId,
+      });
+    } else {
+      const allowedStatuses = getAllowedFulfillmentStatuses();
+      if (!allowedStatuses.includes(fulfillmentStatus)) {
+        updateRequest(pending.tokenHash, {
+          status: 'rejected_order_fulfilled',
+          refundStatus: 'denied',
+        });
+        auditLog('webhook_retry_success', {
+          webhookId,
+          orderId,
+          action: 'order_fulfilled',
+          traceId: req.traceId,
+        });
+      }
+    }
+
+    logger.info('Webhook retry completed', {
+      webhookId,
+      orderId,
+      status: failedWebhook.status,
+    });
+
+    return res.json({ ok: true, message: 'Webhook reprocessed successfully' });
+  } catch (error) {
+    logger.error('Failed to retry webhook', { error: error.message, traceId: req.traceId });
+    return res.status(500).json({ ok: false, error: 'Failed to retry webhook' });
+  }
+});
+
+/**
+ * GET /admin/webhooks/metrics
+ * Get webhook metrics: success/failure counts by topic for last 24h
+ */
+app.get('/admin/webhooks/metrics', requireAdmin, (_req, res) => {
+  try {
+    const db = getDb();
+    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+    // Get counts by status and topic for last 24h
+    const stmt = db.prepare(`
+      SELECT topic, status, COUNT(*) as count
+      FROM webhook_processing_log
+      WHERE created_at > ?
+      GROUP BY topic, status
+      ORDER BY topic, status
+    `);
+
+    const rows = stmt.all(oneDayAgo);
+
+    // Aggregate data
+    const metrics = {
+      lastUpdated: new Date().toISOString(),
+      last24h: {
+        byTopic: {},
+        totals: {
+          succeeded: 0,
+          failed: 0,
+          skipped: 0,
+        },
+      },
+    };
+
+    rows.forEach((row) => {
+      if (!metrics.last24h.byTopic[row.topic]) {
+        metrics.last24h.byTopic[row.topic] = { succeeded: 0, failed: 0, skipped: 0 };
+      }
+      metrics.last24h.byTopic[row.topic][row.status] = row.count;
+      metrics.last24h.totals[row.status] += row.count;
+    });
+
+    res.json({ ok: true, metrics });
+  } catch (error) {
+    logger.error('Failed to get webhook metrics', { error: error.message, traceId: _req.traceId });
+    return res.status(500).json({ ok: false, error: 'Failed to get metrics' });
   }
 });
 
