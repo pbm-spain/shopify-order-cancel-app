@@ -4,12 +4,27 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Cancellation Confirmed</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet" />
     <style nonce="{{NONCE}}">
-      body { font-family: Arial, sans-serif; max-width: 560px; margin: 40px auto; padding: 0 16px; color: #111; }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body { font-family: 'Roboto', sans-serif; background: #eff0f5; color: #111; min-height: 100vh; display: flex; justify-content: center; align-items: flex-start; padding: 48px 16px; }
+      .card { background: #fff; border-radius: 20px; padding: 40px 36px; max-width: 520px; width: 100%; box-shadow: 0 2px 12px rgba(0,0,0,.06); text-align: center; }
+      .icon { width: 56px; height: 56px; background: #e82127; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; margin-bottom: 20px; }
+      .icon svg { width: 28px; height: 28px; stroke: #fff; fill: none; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+      h1 { font-size: 24px; font-weight: 700; color: #0e1b4d; margin-bottom: 12px; }
+      p { font-size: 15px; color: #555; line-height: 1.55; }
+      @media (max-width: 560px) { .card { padding: 28px 20px; } body { padding: 24px 12px; } }
     </style>
   </head>
   <body>
-    <h1>Cancellation Submitted Successfully</h1>
-    <p>Your cancellation has been submitted to Shopify. If your store has customer notifications enabled, you will also receive a standard cancellation email.</p>
+    <div class="card">
+      <div class="icon">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>
+      </div>
+      <h1>Cancellation Submitted Successfully</h1>
+      <p>Your cancellation has been submitted to Shopify. If your store has customer notifications enabled, you will also receive a standard cancellation email.</p>
+    </div>
   </body>
 </html>

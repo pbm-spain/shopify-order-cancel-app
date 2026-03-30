@@ -4,59 +4,64 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Admin - Cancel App</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <style nonce="{{NONCE}}">
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #111; background: #f5f5f5; }
-    .header { background: #111; color: #fff; padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; }
-    .header h1 { font-size: 18px; font-weight: 600; }
-    .header a { color: #aaa; text-decoration: none; font-size: 14px; }
-    .container { max-width: 900px; margin: 24px auto; padding: 0 16px; }
-    .card { background: #fff; border-radius: 12px; padding: 24px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
-    .card h2 { font-size: 18px; margin-bottom: 16px; }
-    .card h3 { font-size: 15px; margin: 16px 0 10px; color: #333; }
-    .card-desc { font-size: 13px; color: #666; margin-bottom: 12px; }
+    body { font-family: 'Roboto', sans-serif; color: #111; background: #eff0f5; }
+    .header { background: #0e1b4d; color: #fff; padding: 18px 28px; display: flex; justify-content: space-between; align-items: center; }
+    .header h1 { font-size: 18px; font-weight: 700; letter-spacing: .03em; }
+    .header a { color: rgba(255,255,255,.65); text-decoration: none; font-size: 14px; font-weight: 500; transition: color .2s; }
+    .header a:hover { color: #fff; }
+    .container { max-width: 920px; margin: 28px auto; padding: 0 16px; }
+    .card { background: #fff; border-radius: 20px; padding: 28px; margin-bottom: 22px; box-shadow: 0 2px 12px rgba(0,0,0,.06); }
+    .card h2 { font-size: 18px; font-weight: 700; margin-bottom: 16px; color: #0e1b4d; }
+    .card h3 { font-size: 14px; font-weight: 600; margin: 18px 0 10px; color: #333; letter-spacing: .02em; }
+    .card-desc { font-size: 13px; color: #666; margin-bottom: 14px; line-height: 1.5; }
     .toggle-row { display: flex; align-items: center; justify-content: space-between; }
-    .toggle-label { font-size: 15px; }
-    .toggle-sublabel { font-size: 13px; color: #666; margin-top: 2px; }
+    .toggle-label { font-size: 15px; font-weight: 500; }
+    .toggle-sublabel { font-size: 13px; color: #666; margin-top: 3px; line-height: 1.45; }
     .switch { position: relative; width: 52px; height: 28px; flex-shrink: 0; }
     .switch input { opacity: 0; width: 0; height: 0; }
-    .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background: #ccc; border-radius: 28px; transition: .3s; }
+    .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background: #d0d1d6; border-radius: 28px; transition: .3s; }
     .slider::before { content: ''; position: absolute; height: 22px; width: 22px; left: 3px; bottom: 3px; background: #fff; border-radius: 50%; transition: .3s; }
-    input:checked + .slider { background: #27ae60; }
+    input:checked + .slider { background: #e82127; }
     input:checked + .slider::before { transform: translateX(24px); }
-    .status-badge { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+    .status-badge { display: inline-block; padding: 4px 12px; border-radius: 40px; font-size: 12px; font-weight: 600; letter-spacing: .02em; }
     .badge-pending { background: #fef3c7; color: #92400e; }
     .badge-approved { background: #d1fae5; color: #065f46; }
     .badge-denied { background: #fee2e2; color: #991b1b; }
     .badge-auto { background: #dbeafe; color: #1e40af; }
     table { width: 100%; border-collapse: collapse; font-size: 14px; }
-    th { text-align: left; padding: 10px 12px; border-bottom: 2px solid #e5e5e5; font-weight: 600; color: #555; font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
-    td { padding: 10px 12px; border-bottom: 1px solid #f0f0f0; vertical-align: middle; }
-    .btn { display: inline-block; padding: 6px 14px; border: 0; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; text-decoration: none; }
-    .btn-approve { background: #27ae60; color: #fff; }
-    .btn-approve:hover { background: #219a52; }
-    .btn-deny { background: #e5e5e5; color: #333; margin-left: 6px; }
-    .btn-deny:hover { background: #d0d0d0; }
-    .empty { color: #999; font-size: 14px; padding: 20px 0; text-align: center; }
-    .flash { padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; font-size: 14px; }
+    th { text-align: left; padding: 10px 12px; border-bottom: 2px solid #e0e1e6; font-weight: 600; color: #555; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+    td { padding: 10px 12px; border-bottom: 1px solid #f0f0f3; vertical-align: middle; }
+    tr:hover td { background: rgba(14,27,77,.015); }
+    .btn { display: inline-block; padding: 7px 18px; border: 0; border-radius: 40px; cursor: pointer; font-size: 13px; font-weight: 600; text-decoration: none; font-family: inherit; transition: background .2s; }
+    .btn-approve { background: #e82127; color: #fff; }
+    .btn-approve:hover { background: #b73229; }
+    .btn-deny { background: #eff0f5; color: #333; margin-left: 6px; }
+    .btn-deny:hover { background: #d0d1d6; }
+    .btn:focus-visible, .pagination-btn:focus-visible { outline: 2px solid #0e1b4d; outline-offset: 2px; }
+    .empty { color: #999; font-size: 14px; padding: 24px 0; text-align: center; }
+    .flash { padding: 14px 18px; border-radius: 14px; margin-bottom: 18px; font-size: 14px; font-weight: 500; }
     .flash-success { background: #d1fae5; color: #065f46; }
     .flash-error { background: #fee2e2; color: #991b1b; }
-    /* Checkbox grid for statuses */
     .cb-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 16px; }
-    .cb-label { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; cursor: pointer; font-size: 14px; transition: background .15s; }
-    .cb-label:hover { background: #f5f5f5; }
-    .cb-label input[type="checkbox"] { width: 16px; height: 16px; accent-color: #27ae60; cursor: pointer; flex-shrink: 0; }
+    .cb-label { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 12px; cursor: pointer; font-size: 14px; transition: background .15s; }
+    .cb-label:hover { background: #f5f5f8; }
+    .cb-label input[type="checkbox"] { width: 16px; height: 16px; accent-color: #e82127; cursor: pointer; flex-shrink: 0; }
     .cb-text { flex: 1; }
-    .cb-code { font-size: 11px; color: #999; background: #f0f0f0; padding: 1px 6px; border-radius: 4px; }
-    .save-indicator { font-size: 13px; color: #27ae60; opacity: 0; transition: opacity .3s; margin-left: 8px; }
+    .cb-code { font-size: 11px; color: #999; background: #eff0f5; padding: 2px 8px; border-radius: 8px; }
+    .save-indicator { font-size: 13px; color: #e82127; opacity: 0; transition: opacity .3s; margin-left: 8px; font-weight: 500; }
     .save-indicator.show { opacity: 1; }
-    .divider { border: 0; border-top: 1px solid #eee; margin: 16px 0; }
-    .pagination { display: flex; justify-content: center; align-items: center; gap: 12px; margin-top: 20px; padding-top: 16px; border-top: 1px solid #f0f0f0; }
-    .pagination-btn { padding: 6px 14px; border: 1px solid #ddd; border-radius: 6px; background: #fff; cursor: pointer; font-size: 13px; font-weight: 600; transition: all .15s; }
-    .pagination-btn:hover:not(:disabled) { background: #f5f5f5; border-color: #999; }
-    .pagination-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .divider { border: 0; border-top: 1px solid #eee; margin: 18px 0; }
+    .pagination { display: flex; justify-content: center; align-items: center; gap: 12px; margin-top: 22px; padding-top: 18px; border-top: 1px solid #f0f0f3; }
+    .pagination-btn { padding: 7px 18px; border: 1px solid #d0d1d6; border-radius: 40px; background: #fff; cursor: pointer; font-size: 13px; font-weight: 600; font-family: inherit; transition: all .2s; }
+    .pagination-btn:hover:not(:disabled) { background: #eff0f5; border-color: #0e1b4d; color: #0e1b4d; }
+    .pagination-btn:disabled { opacity: 0.4; cursor: not-allowed; }
     .pagination-info { font-size: 13px; color: #666; min-width: 120px; text-align: center; }
-    @media (max-width: 600px) { .cb-grid { grid-template-columns: 1fr; } .pagination { gap: 8px; } .pagination-btn { padding: 4px 10px; font-size: 12px; } .pagination-info { min-width: auto; } }
+    @media (max-width: 600px) { .cb-grid { grid-template-columns: 1fr; } .pagination { gap: 8px; } .pagination-btn { padding: 5px 12px; font-size: 12px; } .pagination-info { min-width: auto; } .card { padding: 20px 16px; border-radius: 16px; } }
   </style>
 </head>
 <body>
