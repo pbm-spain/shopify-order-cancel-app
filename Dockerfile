@@ -26,7 +26,6 @@ COPY --from=deps /app/package.json ./package.json
 # Copy application source
 COPY src/ ./src/
 COPY views/ ./views/
-COPY public/ ./public/
 
 # Create data directory with correct permissions
 RUN mkdir -p /app/data && chown -R appuser:appgroup /app/data
