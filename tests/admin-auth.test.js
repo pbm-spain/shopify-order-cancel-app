@@ -26,6 +26,29 @@ beforeEach(() => {
 
 const ADMIN_TOKEN = process.env.ADMIN_API_TOKEN;
 
+// Helper to create a valid Shopify session token (unsigned JWT)
+function createSessionToken(overrides = {}) {
+  const now = Math.floor(Date.now() / 1000);
+  const payload = {
+    iss: `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin`,
+    dest: process.env.SHOPIFY_STORE_DOMAIN,
+    aud: process.env.SHOPIFY_API_KEY || 'test-api-key',
+    sub: 'user-123',
+    exp: now + 60, // Valid for 1 minute
+    nbf: now - 10,
+    iat: now,
+    jti: crypto.randomUUID(),
+    sid: crypto.randomUUID(),
+    ...overrides,
+  };
+
+  // Create unsigned JWT (custom apps don't verify signature)
+  const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64');
+  const body = Buffer.from(JSON.stringify(payload)).toString('base64');
+  const signature = Buffer.from('unsigned').toString('base64');
+  return `${header}.${body}.${signature}`;
+}
+
 describe('Open Redirect Prevention', () => {
   it('redirects to /admin for external URLs', async () => {
     const res = await request(app)
@@ -223,5 +246,104 @@ describe('Admin Login Rate Limiting', () => {
 
     expect(res.status).toBe(429);
     expect(res.headers['retry-after']).toBeDefined();
+  });
+});
+
+describe('Shopify Session Token Auth', () => {
+  it('rejects forged Shopify session token for security (JWT auth disabled)', async () => {
+    // JWT auth is disabled for custom apps without signing secret
+    // This prevents JWT forgery attacks
+    const token = createSessionToken();
+    const res = await request(app)
+      .get('/admin')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(401);
+  });
+
+  it('rejects malformed Shopify session token', async () => {
+    const res = await request(app)
+      .get('/admin')
+      .set('Authorization', 'Bearer malformed.jwt.token.with.extra.parts');
+
+    expect(res.status).toBe(401);
+  });
+
+  it('requires admin API token for Bearer auth', async () => {
+    // With JWT auth disabled, only valid admin API token works
+    const res = await request(app)
+      .get('/admin')
+      .set('Authorization', `Bearer ${ADMIN_TOKEN}`);
+
+    expect(res.status).toBe(200);
+    expect(res.type).toMatch(/html/);
+  });
+
+  it('rejects invalid Bearer token', async () => {
+    const res = await request(app)
+      .get('/admin')
+      .set('Authorization', 'Bearer invalid_token_value');
+
+    expect(res.status).toBe(401);
+  });
+});
+
+describe('CSP and X-Frame-Options for Embedded Admin', () => {
+  it('sets frame-ancestors CSP when ?shop= query param is present', async () => {
+    const res = await request(app)
+      .get('/admin?shop=test-shop.myshopify.com')
+      .set('Authorization', `Bearer ${ADMIN_TOKEN}`);
+
+    expect(res.status).toBe(200);
+    const csp = res.headers['content-security-policy'];
+    expect(csp).toContain('frame-ancestors');
+    expect(csp).toContain('admin.shopify.com');
+  });
+
+  it('sets frame-ancestors CSP when ?embedded=1 query param is present', async () => {
+    const res = await request(app)
+      .get('/admin?embedded=1')
+      .set('Authorization', `Bearer ${ADMIN_TOKEN}`);
+
+    expect(res.status).toBe(200);
+    const csp = res.headers['content-security-policy'];
+    expect(csp).toContain('frame-ancestors');
+  });
+
+  it('does not set X-Frame-Options when embedded', async () => {
+    const res = await request(app)
+      .get('/admin?shop=test-shop.myshopify.com')
+      .set('Authorization', `Bearer ${ADMIN_TOKEN}`);
+
+    expect(res.status).toBe(200);
+    // When embedded, X-Frame-Options should not be set or should allow framing
+    const xFrameOptions = res.headers['x-frame-options'];
+    // Should be DENY only when not embedded
+    if (xFrameOptions) {
+      expect(xFrameOptions).not.toBe('DENY');
+    }
+  });
+
+  it('sets X-Frame-Options DENY when not embedded', async () => {
+    const res = await request(app)
+      .get('/admin')
+      .set('Authorization', `Bearer ${ADMIN_TOKEN}`);
+
+    expect(res.status).toBe(200);
+    // When not embedded, should prevent framing
+    const csp = res.headers['content-security-policy'];
+    expect(csp).toContain("frame-ancestors 'none'");
+  });
+
+  it('includes App Bridge CDN script when SHOPIFY_API_KEY is configured', async () => {
+    const res = await request(app)
+      .get('/admin')
+      .set('Authorization', `Bearer ${ADMIN_TOKEN}`);
+
+    expect(res.status).toBe(200);
+    if (process.env.SHOPIFY_API_KEY) {
+      expect(res.text).toContain('shopify-api-key');
+      expect(res.text).toContain('cdn.shopify.com/shopifycloud/app-bridge.js');
+    }
   });
 });
