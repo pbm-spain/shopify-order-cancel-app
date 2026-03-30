@@ -12,8 +12,9 @@ RUN npm ci --omit=dev
 # ── Stage 2: Production image ────────────────────────────────────────
 FROM node:20-alpine AS production
 
-# Install runtime tools: curl (healthcheck), sqlite (provides sqlite3 CLI for backups & DB inspection)
+# Install runtime tools, upgrade all packages for CVE patches, then create non-root user
 RUN apk add --no-cache curl sqlite \
+    && apk upgrade --no-cache \
     && addgroup -g 1001 -S appgroup \
     && adduser -u 1001 -S appuser -G appgroup
 
@@ -30,6 +31,10 @@ COPY scripts/ ./scripts/
 
 # Create data directory with correct permissions
 RUN mkdir -p /app/data && chown -R appuser:appgroup /app/data
+
+# Remove npm/npx/corepack (not needed at runtime) to eliminate bundled CVEs
+# (node-gyp bundles vulnerable versions of tar, glob, minimatch, cross-spawn)
+RUN rm -rf /usr/local/lib/node_modules /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
 
 ENV NODE_ENV=production
 ENV DATA_DIR=/app/data
