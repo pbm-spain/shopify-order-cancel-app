@@ -5,7 +5,7 @@ import path from 'path';
 import cookieParser from 'cookie-parser';
 import { fileURLToPath } from 'url';
 import { config } from './config.js';
-import { verifyAppProxySignature } from './appProxy.js';
+import { verifyAppProxySignature, verifyTimestamp } from './appProxy.js';
 import {
   cancelOrder, createOrderRefund, findOrderByEmailAndName, findOrderById, isOrderCancelable,
   addTagsToOrder, removeTagsFromOrder, updateOrderNote,
@@ -22,7 +22,7 @@ import {
 } from './storage.js';
 import { sendConfirmationEmail } from './email.js';
 import { rateLimit } from './rateLimit.js';
-import { csrfGenerate, csrfValidate } from './csrf.js';
+import { csrfGenerate, csrfValidate, CSRF_COOKIE, CSRF_FIELD } from './csrf.js';
 import { requireAdmin, adminLogin, adminLogout, adminCsrfGenerate, adminCsrfValidate } from './adminAuth.js';
 import { buildStatusCheckboxes, buildPendingTable, buildRecentTable, buildPagination } from './views.js';
 import { logger, auditLog } from './logger.js';
@@ -53,18 +53,33 @@ app.use((req, res, next) => {
 });
 
 // ─── Security headers with CSP nonces (Fix #17) ────────────────────
+// Fix #1: Skip X-Frame-Options and CSP for proxy routes so Shopify can embed
+// the response in the theme. Shopify App Proxy requires framing to work.
 
 app.use((_req, res, next) => {
   const nonce = crypto.randomBytes(16).toString('hex');
   res.locals.nonce = nonce;
 
+  // Check if this is a proxy route (GET /proxy or POST /proxy/*)
+  const isProxyRoute = _req.path === '/proxy' || _req.path.startsWith('/proxy/');
+
   res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('X-Frame-Options', 'DENY');
+
+  // Skip X-Frame-Options for proxy routes (Shopify needs to frame the response in theme)
+  if (!isProxyRoute) {
+    res.setHeader('X-Frame-Options', 'DENY');
+  }
+
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-  res.setHeader(
-    'Content-Security-Policy',
-    `default-src 'self'; script-src 'self' 'nonce-${nonce}'; style-src 'self' 'nonce-${nonce}' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com;`,
-  );
+
+  // Skip CSP for proxy routes (Shopify strips CSP anyway for theme safety)
+  if (!isProxyRoute) {
+    res.setHeader(
+      'Content-Security-Policy',
+      `default-src 'self'; script-src 'self' 'nonce-${nonce}'; style-src 'self' 'nonce-${nonce}' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com;`,
+    );
+  }
+
   if (config.appBaseUrl.startsWith('https')) {
     res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   }
@@ -186,15 +201,87 @@ app.get('/cancel-order', csrfGenerate, (_req, res) => {
   res.type('html').send(html);
 });
 
-// ─── Cancellation Request (App Proxy POST) ───────────────────────────
+// ─── Proxy Form (served through Shopify App Proxy) ─────────────────────
+// Returns application/liquid so Shopify wraps the form in the theme
+// Verifies App Proxy signature and timestamp to prevent replay attacks
 
-app.post('/proxy/request', cancelRateLimit, csrfValidate, emailRateLimit, async (req, res) => {
+app.get('/proxy', (_req, res) => {
   try {
     // Verify App Proxy HMAC signature
+    const signatureOk = verifyAppProxySignature(_req.query);
+    if (!signatureOk) {
+      logger.warn('Invalid app proxy signature on GET /proxy', { ip: _req.ip });
+      return res.status(401).send('Invalid App Proxy signature.');
+    }
+
+    // Verify timestamp to prevent replay attacks (5-minute window)
+    if (!verifyTimestamp(_req.query)) {
+      logger.warn('Invalid or expired timestamp on GET /proxy', { ip: _req.ip, timestamp: _req.query.timestamp });
+      return res.status(401).send('Request timestamp is invalid or expired.');
+    }
+
+    const template = fs.readFileSync(path.join(__dirname, '..', 'views', 'proxy-form.html'), 'utf8');
+    const html = template
+      .replace(/\{\{CSRF_TOKEN\}\}/g, '')
+      .replace(/\{\{NONCE\}\}/g, res.locals.nonce);
+
+    res.type('application/liquid').send(html);
+  } catch (error) {
+    logger.error('Proxy form request failed', { error: error.message, stack: error.stack });
+    return res.status(500).send('Could not load the cancellation form.');
+  }
+});
+
+// ─── Cancellation Request (App Proxy POST or Standalone) ──────────────
+// Supports two auth flows:
+// 1. Via Shopify App Proxy: requires signature + timestamp verification (no CSRF)
+// 2. Standalone form: requires CSRF token validation (no signature)
+
+function verifyRequestAuth(req, res) {
+  const hasAppProxySignature = Boolean(req.query.signature);
+
+  if (hasAppProxySignature) {
+    // App Proxy flow: verify signature and timestamp
     const signatureOk = verifyAppProxySignature(req.query);
     if (!signatureOk) {
-      logger.warn('Invalid app proxy signature', { ip: req.ip });
-      return res.status(401).send('Invalid App Proxy signature.');
+      logger.warn('Invalid app proxy signature on POST /proxy/request', { ip: req.ip });
+      return { ok: false, status: 401, message: 'Invalid App Proxy signature.' };
+    }
+
+    if (!verifyTimestamp(req.query)) {
+      logger.warn('Invalid or expired timestamp on POST /proxy/request', { ip: req.ip, timestamp: req.query.timestamp });
+      return { ok: false, status: 401, message: 'Request timestamp is invalid or expired.' };
+    }
+
+    return { ok: true };
+  }
+
+  // Standalone flow: use CSRF token validation
+  const cookieToken = req.cookies?.[CSRF_COOKIE] || '';
+  const bodyToken = req.body?.[CSRF_FIELD] || '';
+
+  if (!cookieToken || !bodyToken) {
+    logger.warn('Missing CSRF token on POST /proxy/request', { ip: req.ip, hasCookie: Boolean(cookieToken), hasBody: Boolean(bodyToken) });
+    return { ok: false, status: 403, message: 'Missing CSRF token. Please reload the form and try again.' };
+  }
+
+  const cookieBuf = Buffer.from(String(cookieToken));
+  const bodyBuf = Buffer.from(String(bodyToken));
+
+  if (cookieBuf.length !== bodyBuf.length || !crypto.timingSafeEqual(cookieBuf, bodyBuf)) {
+    logger.warn('Invalid CSRF token on POST /proxy/request', { ip: req.ip });
+    return { ok: false, status: 403, message: 'Invalid CSRF token. Please reload the form and try again.' };
+  }
+
+  return { ok: true };
+}
+
+app.post('/proxy/request', cancelRateLimit, emailRateLimit, async (req, res) => {
+  try {
+    // Verify authentication (either App Proxy signature or CSRF token)
+    const authResult = verifyRequestAuth(req, res);
+    if (!authResult.ok) {
+      return res.status(authResult.status).send(authResult.message);
     }
 
     const email = normalizeEmail(req.body.email);
@@ -284,7 +371,11 @@ app.post('/proxy/request', cancelRateLimit, csrfValidate, emailRateLimit, async 
     });
 
     const sentTemplate = fs.readFileSync(path.join(__dirname, '..', 'views', 'request-sent.html'), 'utf8');
-    return res.type('html').send(sentTemplate.replace(/\{\{NONCE\}\}/g, res.locals.nonce));
+    // Fix #5: Return application/liquid for App Proxy requests (via signature),
+    // text/html for standalone form submissions (via CSRF)
+    const hasAppProxySignature = Boolean(req.query.signature);
+    const contentType = hasAppProxySignature ? 'application/liquid' : 'text/html';
+    return res.type(contentType).send(sentTemplate.replace(/\{\{NONCE\}\}/g, res.locals.nonce));
   } catch (error) {
     logger.error('Cancel request failed', { error: error.message, stack: error.stack });
     return res.status(500).send('Could not process the cancellation request.');

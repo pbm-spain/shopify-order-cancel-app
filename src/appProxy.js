@@ -42,3 +42,36 @@ export function verifyAppProxySignature(query) {
   if (providedBuf.length !== calculatedBuf.length) return false;
   return crypto.timingSafeEqual(providedBuf, calculatedBuf);
 }
+
+/**
+ * Verify App Proxy timestamp is within acceptable age to prevent replay attacks.
+ *
+ * Shopify includes a timestamp query parameter in App Proxy requests.
+ * This function validates that the timestamp is recent (within maxAgeSeconds).
+ * Allows up to 30 seconds in the future (clock skew tolerance) to handle client/server time drift.
+ *
+ * @param {Object} query - Query parameters from the request
+ * @param {number} maxAgeSeconds - Maximum age of the timestamp in seconds (default 300 = 5 minutes)
+ * @returns {boolean} true if timestamp is valid and recent, false otherwise
+ */
+export function verifyTimestamp(query, maxAgeSeconds = 300) {
+  const timestamp = query.timestamp;
+  if (!timestamp) return false;
+
+  const parsed = parseInt(String(timestamp), 10);
+  if (isNaN(parsed)) return false;
+
+  const requestTime = new Date(parsed * 1000); // Shopify sends Unix timestamp in seconds
+  // Fix #10: Explicitly check for Invalid Date
+  if (isNaN(requestTime.getTime())) return false;
+
+  const now = Date.now();
+  const maxAgeMs = maxAgeSeconds * 1000;
+  const clockSkewMs = 30 * 1000; // Allow 30 seconds of clock skew (future tolerance)
+
+  // Allow timestamps that are:
+  // - Not older than maxAgeSeconds (5 minutes)
+  // - Not more than 30 seconds in the future (clock skew tolerance)
+  const ageMs = now - requestTime.getTime();
+  return ageMs >= -clockSkewMs && ageMs <= maxAgeMs;
+}

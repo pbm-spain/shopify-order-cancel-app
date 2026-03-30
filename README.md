@@ -156,8 +156,10 @@ In your app settings under **App Proxy**:
 
 This makes the cancellation form accessible at:
 ```
-https://your-store.myshopify.com/apps/order-cancel/cancel-order
+https://your-store.myshopify.com/apps/order-cancel
 ```
+
+The form is rendered inside your Shopify theme (wrapped automatically via `application/liquid`). A standalone version is also available at `https://your-app.example.com/cancel-order` for direct access outside the storefront.
 
 ### 4. Register Webhooks
 
@@ -212,7 +214,8 @@ src/
 ├── views.js         # HTML rendering helpers (tables, badges, pagination)
 └── webhooks.js      # Shopify webhook handlers (HMAC verification + processing)
 views/
-├── form.html        # Customer cancellation request form
+├── form.html        # Customer cancellation request form (standalone)
+├── proxy-form.html  # Customer cancellation request form (Shopify App Proxy)
 ├── admin.html       # Admin dashboard (settings, pending refunds, history)
 ├── success.html     # Cancellation confirmed page
 └── request-sent.html # "Check your email" confirmation page
@@ -252,7 +255,7 @@ SQLite database stored at `DATA_DIR/cancel-requests.db` with WAL mode for concur
 
 ### Data Flow
 
-1. **Request phase:** Customer submits form → App Proxy HMAC verified → Order looked up via GraphQL → Token generated (SHA-256 hashed in DB) → Confirmation email sent
+1. **Request phase:** Customer submits form (via Shopify storefront or standalone) → Auth verified (HMAC signature + timestamp for App Proxy, CSRF for standalone) → Order looked up via GraphQL → Token generated (SHA-256 hashed in DB) → Confirmation email sent
 2. **Confirmation phase:** Customer clicks link → Token validated → Order re-verified → Cancel mutation sent to Shopify (async Job) → DB updated
 3. **Refund phase (if manual):** Order tagged `refund-pending` in Shopify → Admin approves/denies via dashboard → Refund created via GraphQL with idempotency key
 
@@ -272,8 +275,9 @@ SQLite database stored at `DATA_DIR/cancel-requests.db` with WAL mode for concur
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/health` | Health check (tests DB connectivity) |
-| `GET` | `/cancel-order` | Customer cancellation form |
-| `POST` | `/proxy/request` | Submit cancellation request (App Proxy HMAC + CSRF + rate limited) |
+| `GET` | `/cancel-order` | Customer cancellation form (standalone with CSRF) |
+| `GET` | `/proxy` | Customer cancellation form via Shopify App Proxy (signature + timestamp verified, returns `application/liquid` for theme wrapping) |
+| `POST` | `/proxy/request` | Submit cancellation request (dual auth: App Proxy HMAC + timestamp, or CSRF for standalone) |
 | `GET` | `/confirm?token=<token>` | Confirm cancellation from email link (rate limited) |
 
 ### Webhooks (HMAC-verified)
@@ -347,14 +351,15 @@ Webhooks keep the app in sync when orders are modified outside the app (e.g., fr
 
 | Layer | Mechanism |
 |---|---|
-| App Proxy | HMAC-SHA256 signature verification (Shopify shared secret) |
+| App Proxy | HMAC-SHA256 signature + timestamp verification (5-minute replay window, 30s clock skew tolerance) |
 | Webhooks | HMAC-SHA256 signature verification (webhook secret) |
 | Admin dashboard | Opaque server-side session tokens with IP binding |
 | Admin API | Bearer token authentication |
 
 ### CSRF Protection
 
-- **Customer forms:** Double-submit cookie pattern
+- **Standalone customer form (`/cancel-order`):** Double-submit cookie pattern
+- **App Proxy customer form (`/proxy`):** No CSRF needed — Shopify's HMAC signature serves as request authenticity verification
 - **Admin panel:** Session-based CSRF tokens (one per session, timing-safe comparison)
 
 ### Rate Limiting
@@ -383,6 +388,8 @@ X-Frame-Options: DENY
 Referrer-Policy: strict-origin-when-cross-origin
 Strict-Transport-Security: max-age=31536000; includeSubDomains  (when HTTPS)
 ```
+
+App Proxy routes (`/proxy`, `/proxy/*`) are exempt from `X-Frame-Options` and `Content-Security-Policy` because Shopify needs to frame the response within the storefront theme and strips CSP headers from proxy responses.
 
 ### Additional Protections
 
@@ -610,7 +617,7 @@ Morgan (`combined` format) logs every HTTP request to stdout.
 ### Automated Tests
 
 ```bash
-# Run all tests (92 tests across 7 test files)
+# Run all tests (104 tests across 7 test files)
 npm test
 
 # Watch mode for development
@@ -621,13 +628,13 @@ npm run test:coverage
 ```
 
 **Test suites:**
-- **cancel-flow** — Form CSRF, App Proxy HMAC, input validation, cancellation flow, duplicate prevention
+- **cancel-flow** — Form CSRF, App Proxy HMAC, dual-auth flow, input validation, cancellation flow, duplicate prevention
 - **refund-flow** — Refund approval/denial, atomic state transitions, webhook-driven sync
 - **admin-auth** — Bearer token auth, session auth, login/logout, rate limiting, open redirect prevention
 - **webhook-hmac** — HMAC verification, deduplication, timing safety
 - **views** — HTML rendering helpers (tables, badges, pagination, XSS prevention)
 - **error-handler** — Error capture, Express error middleware
-- **edge-cases** — Token expiry/reuse, admin pagination, settings validation, storage atomicity
+- **edge-cases** — Token expiry/reuse, admin pagination, settings validation, storage atomicity, App Proxy signature/timestamp validation, proxy security headers
 
 ### Manual Testing Flow
 
@@ -711,7 +718,7 @@ The GitHub Actions CI runs on every push/PR to `main`:
 1. **Matrix test** — Node.js 20 and 22
 2. **Security audit** — `npm audit --audit-level=high`
 3. **Linting** — ESLint with ES2022 rules
-4. **Tests** — Full Vitest suite (92 tests)
+4. **Tests** — Full Vitest suite (104 tests)
 
 ### Docker Publish Pipeline
 

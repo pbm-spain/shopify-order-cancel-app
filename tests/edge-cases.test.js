@@ -315,7 +315,7 @@ describe('Webhook Edge Cases', () => {
 describe('Input Validation Edge Cases', () => {
   it('rejects order number with leading zeros', async () => {
     const { csrfToken, cookieHeader } = await getCsrfToken();
-    const params = { timestamp: '1234567890' };
+    const params = { timestamp: Math.floor(Date.now() / 1000).toString() };
     params.signature = generateAppProxySignature(params);
     const qs = new URLSearchParams(params).toString();
 
@@ -331,7 +331,7 @@ describe('Input Validation Edge Cases', () => {
 
   it('rejects empty email', async () => {
     const { csrfToken, cookieHeader } = await getCsrfToken();
-    const params = { timestamp: '1234567890' };
+    const params = { timestamp: Math.floor(Date.now() / 1000).toString() };
     params.signature = generateAppProxySignature(params);
     const qs = new URLSearchParams(params).toString();
 
@@ -346,7 +346,7 @@ describe('Input Validation Edge Cases', () => {
 
   it('handles very long email gracefully', async () => {
     const { csrfToken, cookieHeader } = await getCsrfToken();
-    const params = { timestamp: '1234567890' };
+    const params = { timestamp: Math.floor(Date.now() / 1000).toString() };
     params.signature = generateAppProxySignature(params);
     const qs = new URLSearchParams(params).toString();
 
@@ -359,6 +359,148 @@ describe('Input Validation Edge Cases', () => {
 
     // Should either be rejected or handled without crashing
     expect(res.status).toBeLessThan(500);
+  });
+});
+
+// ─── GET /proxy endpoint tests (Issue #16) ─────────────────────────
+
+describe('GET /proxy Endpoint (Shopify App Proxy Form)', () => {
+  it('accepts valid signature and timestamp', async () => {
+    const params = { timestamp: Math.floor(Date.now() / 1000).toString() };
+    params.signature = generateAppProxySignature(params);
+    const queryString = new URLSearchParams(params).toString();
+
+    const res = await request(app).get(`/proxy?${queryString}`);
+
+    expect(res.status).toBe(200);
+    expect(res.type).toMatch(/html|liquid/);
+  });
+
+  it('returns application/liquid content type', async () => {
+    const params = { timestamp: Math.floor(Date.now() / 1000).toString() };
+    params.signature = generateAppProxySignature(params);
+    const queryString = new URLSearchParams(params).toString();
+
+    const res = await request(app).get(`/proxy?${queryString}`);
+
+    expect(res.type).toContain('liquid');
+  });
+
+  it('rejects invalid signature', async () => {
+    const params = { timestamp: Math.floor(Date.now() / 1000).toString(), signature: 'invalid-sig' };
+    const queryString = new URLSearchParams(params).toString();
+
+    const res = await request(app).get(`/proxy?${queryString}`);
+
+    expect(res.status).toBe(401);
+    expect(res.text).toContain('Invalid App Proxy signature');
+  });
+
+  it('rejects missing signature', async () => {
+    const params = { timestamp: Math.floor(Date.now() / 1000).toString() };
+    const queryString = new URLSearchParams(params).toString();
+
+    const res = await request(app).get(`/proxy?${queryString}`);
+
+    expect(res.status).toBe(401);
+  });
+
+  it('rejects expired timestamp', async () => {
+    // Timestamp from 10 minutes ago
+    const oldTimestamp = Math.floor(Date.now() / 1000) - 600;
+    const params = { timestamp: oldTimestamp.toString() };
+    params.signature = generateAppProxySignature(params);
+    const queryString = new URLSearchParams(params).toString();
+
+    const res = await request(app).get(`/proxy?${queryString}`);
+
+    expect(res.status).toBe(401);
+    expect(res.text).toContain('timestamp is invalid or expired');
+  });
+
+  it('rejects missing timestamp', async () => {
+    const params = {};
+    params.signature = generateAppProxySignature(params);
+    const queryString = new URLSearchParams(params).toString();
+
+    const res = await request(app).get(`/proxy?${queryString}`);
+
+    expect(res.status).toBe(401);
+  });
+
+  it('does not set X-Frame-Options DENY header', async () => {
+    const params = { timestamp: Math.floor(Date.now() / 1000).toString() };
+    params.signature = generateAppProxySignature(params);
+    const queryString = new URLSearchParams(params).toString();
+
+    const res = await request(app).get(`/proxy?${queryString}`);
+
+    expect(res.headers['x-frame-options']).toBeUndefined();
+  });
+
+  it('does not set CSP header for proxy routes', async () => {
+    const params = { timestamp: Math.floor(Date.now() / 1000).toString() };
+    params.signature = generateAppProxySignature(params);
+    const queryString = new URLSearchParams(params).toString();
+
+    const res = await request(app).get(`/proxy?${queryString}`);
+
+    expect(res.headers['content-security-policy']).toBeUndefined();
+  });
+
+  it('allows timestamps up to 30 seconds in the future (clock skew tolerance)', async () => {
+    // Timestamp 20 seconds in the future (within tolerance)
+    const futureTimestamp = Math.floor(Date.now() / 1000) + 20;
+    const params = { timestamp: futureTimestamp.toString() };
+    params.signature = generateAppProxySignature(params);
+    const queryString = new URLSearchParams(params).toString();
+
+    const res = await request(app).get(`/proxy?${queryString}`);
+
+    expect(res.status).toBe(200);
+  });
+
+  it('rejects timestamps more than 30 seconds in the future', async () => {
+    // Timestamp 60 seconds in the future (beyond tolerance)
+    const futureTimestamp = Math.floor(Date.now() / 1000) + 60;
+    const params = { timestamp: futureTimestamp.toString() };
+    params.signature = generateAppProxySignature(params);
+    const queryString = new URLSearchParams(params).toString();
+
+    const res = await request(app).get(`/proxy?${queryString}`);
+
+    expect(res.status).toBe(401);
+  });
+});
+
+// ─── CSRF bypass tests (Issue #18) ──────────────────────────────────
+
+describe('CSRF Protection with App Proxy Signature', () => {
+  it('ignores invalid CSRF token when valid App Proxy signature is present', async () => {
+    // Create a valid App Proxy request with invalid CSRF
+    const params = { timestamp: Math.floor(Date.now() / 1000).toString() };
+    params.signature = generateAppProxySignature(params);
+    const queryString = new URLSearchParams(params).toString();
+
+    const res = await request(app)
+      .post(`/proxy/request?${queryString}`)
+      .set('Content-Type', 'application/x-www-form-urlencoded')
+      .send('email=customer@example.com&orderNumber=1001&_csrf=invalid-csrf-token');
+
+    // Should NOT fail with CSRF error (401/403)
+    // Should proceed to validate the order (may fail with 400 if order not found, etc.)
+    expect(res.status).not.toBe(403);
+    expect(res.text).not.toContain('CSRF token');
+  });
+
+  it('requires CSRF token when no App Proxy signature is present', async () => {
+    const res = await request(app)
+      .post('/proxy/request')
+      .set('Content-Type', 'application/x-www-form-urlencoded')
+      .send('email=customer@example.com&orderNumber=1001&_csrf=invalid-csrf-token');
+
+    expect(res.status).toBe(403);
+    expect(res.text).toContain('CSRF token');
   });
 });
 

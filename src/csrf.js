@@ -10,8 +10,8 @@
 import crypto from 'crypto';
 import { config } from './config.js';
 
-const CSRF_COOKIE = '_csrf_token';
-const CSRF_FIELD = '_csrf';
+export const CSRF_COOKIE = '_csrf_token';
+export const CSRF_FIELD = '_csrf';
 
 /**
  * Generate a CSRF token, set it as a cookie, and attach it to res.locals.

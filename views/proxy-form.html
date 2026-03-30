@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Request Cancellation</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet" />
+    <style nonce="{{NONCE}}">
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body { font-family: 'Roboto', sans-serif; background: #eff0f5; color: #111; min-height: 100vh; display: flex; justify-content: center; align-items: flex-start; padding: 48px 16px; }
+      .card { background: #fff; border-radius: 20px; padding: 40px 36px; max-width: 520px; width: 100%; box-shadow: 0 2px 12px rgba(0,0,0,.06); }
+      h1 { font-size: 26px; font-weight: 700; margin-bottom: 10px; color: #0e1b4d; }
+      p.intro { font-size: 15px; color: #555; line-height: 1.55; margin-bottom: 24px; }
+      label { display: block; margin: 16px 0 6px; font-weight: 500; font-size: 14px; letter-spacing: .02em; }
+      input:not([type="hidden"]) { width: 100%; padding: 13px 18px; border: 1px solid #d0d1d6; border-radius: 26px; font-family: inherit; font-size: 15px; transition: border-color .2s; outline: none; }
+      input:focus { border-color: #e82127; box-shadow: 0 0 0 3px rgba(232,33,39,.1); }
+      button { margin-top: 24px; width: 100%; background: #e82127; color: #eff0f5; border: 0; padding: 14px; border-radius: 40px; cursor: pointer; font-size: 16px; font-weight: 600; font-family: inherit; letter-spacing: .03em; transition: background .2s; }
+      button:hover { background: #b73229; }
+      button:disabled { background: #74757a; color: #fff; cursor: not-allowed; }
+      p.small { color: #777; font-size: 13px; margin-top: 18px; text-align: center; }
+      .error { color: #e82127; font-size: 13px; display: none; margin-top: 6px; padding-left: 18px; }
+      @media (max-width: 560px) { .card { padding: 28px 20px; } body { padding: 24px 12px; } }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>Request Cancellation</h1>
+      <p class="intro">Enter the email address associated with your order and your order number. We will send you an email to confirm the cancellation.</p>
+      <form method="post" action="/apps/order-cancel/request" id="cancelForm">
+        <label for="email">Order Email</label>
+        <input id="email" name="email" type="email" required autocomplete="email" />
+
+        <label for="orderNumber">Order Number</label>
+        <input id="orderNumber" name="orderNumber" type="text" placeholder="#1234" required pattern="#[1-9]\d{0,18}" title="Order number must start with # followed by 1-19 digits (e.g. #1234)" />
+        <span class="error" id="orderError">Please enter a valid order number (e.g. #1234)</span>
+
+        <button type="submit" id="submitBtn">Send Confirmation Email</button>
+      </form>
+      <p class="small">Cancellation is only available if the order has not been shipped yet.</p>
+    </div>
+
+    <script nonce="{{NONCE}}">
+      const form = document.getElementById('cancelForm');
+      const orderInput = document.getElementById('orderNumber');
+      const orderError = document.getElementById('orderError');
+      const submitBtn = document.getElementById('submitBtn');
+
+      orderInput.addEventListener('input', () => {
+        const val = orderInput.value.trim();
+        const valid = /^#[1-9]\d{0,18}$/.test(val);
+        orderError.style.display = val && !valid ? 'block' : 'none';
+      });
+
+      form.addEventListener('submit', () => {
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Sending...';
+      });
+    </script>
+  </body>
+</html>
