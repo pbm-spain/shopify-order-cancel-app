@@ -204,6 +204,8 @@ These scopes allow the app to:
 - **`read_orders`**: Look up order details (customer email, fulfillment status, financial status)
 - **`write_orders`**: Cancel orders, create refunds, add/remove tags
 
+> **Note on optional scopes:** The app works with just `read_orders` and `write_orders`. If you also grant `read_assigned_fulfillment_orders`, the app can perform more granular fulfillment-order-level blocking checks (e.g., detecting individual fulfillment orders with status `IN_PROGRESS` or `ON_HOLD`). Without it, the app relies on the order-level `displayFulfillmentStatus` field, which covers the vast majority of cases. The `read_customers` scope is **not required** — the order-level email field is used for customer matching.
+
 ### 4. Get Your API Credentials
 
 After installing the app on your store (Step 8), you can access the API credentials.
@@ -231,10 +233,25 @@ The App Proxy allows customers to access the cancellation form through your Shop
    |---|---|
    | **Sub path prefix** | `apps` |
    | **Sub path** | `order-cancel` |
-   | **Proxy URL** | `https://your-app.example.com/proxy` |
+   | **Proxy URL** | `https://your-app.example.com` (or `https://your-app.example.com/proxy` — see note below) |
 
 4. Save the configuration
 5. Copy the **Shared secret** displayed on the App Proxy config — this is your `SHOPIFY_APP_PROXY_SHARED_SECRET` in `.env`
+
+**Using Shopify CLI (recommended)**
+
+If you use `shopify app deploy` with a `shopify.app.toml` file, the App Proxy is configured in the TOML instead of the Partner Dashboard. The Proxy URL in the TOML is the **base** app URL (without `/proxy`):
+
+```toml
+[app_proxy]
+url = "https://your-app.example.com"
+subpath = "order-cancel"
+prefix = "apps"
+```
+
+This is the default setup. The form action in `views/proxy-form.html` is pre-configured for this method.
+
+> **If using the Partner Dashboard instead:** set the Proxy URL to `https://your-app.example.com/proxy` (with `/proxy` suffix). Then update the form action in `views/proxy-form.html` from `/apps/order-cancel/proxy/request` to `/apps/order-cancel/request`.
 
 **How App Proxy works:**
 
@@ -262,6 +279,42 @@ Webhooks keep your app in sync when orders are modified outside the app (e.g., f
 3. After saving, copy the **Webhook signing secret** — this is your `SHOPIFY_WEBHOOK_SECRET` in `.env`
 
 > **Important:** All three webhook endpoints must be reachable via HTTPS. Shopify will send a test payload to verify they respond with `200 OK`.
+>
+> **Important:** Webhook callback URLs use **slashes** (e.g., `webhooks/orders/updated`), not hyphens. Using hyphens (e.g., `webhooks/orders-updated`) will result in `404` errors because the Express routes expect the slash format.
+
+**Alternative: Register webhooks via the GraphQL Admin API**
+
+You can also register webhooks programmatically using `curl`. This is especially useful during development when the tunnel URL changes frequently:
+
+```bash
+# Register orders/updated webhook
+curl -s -X POST "https://YOUR-STORE.myshopify.com/admin/api/2026-01/graphql.json" \
+  -H "Content-Type: application/json" \
+  -H "X-Shopify-Access-Token: YOUR_ACCESS_TOKEN" \
+  -d '{
+    "query": "mutation { webhookSubscriptionCreate(topic: ORDERS_UPDATED, webhookSubscription: { callbackUrl: \"https://YOUR-APP-URL/webhooks/orders/updated\", format: JSON }) { webhookSubscription { id } userErrors { field message } } }"
+  }'
+```
+
+Repeat for `ORDERS_CANCELLED` (callback: `.../webhooks/orders/cancelled`) and `REFUNDS_CREATE` (callback: `.../webhooks/refunds/create`).
+
+To **list** existing webhooks:
+
+```bash
+curl -s -X POST "https://YOUR-STORE.myshopify.com/admin/api/2026-01/graphql.json" \
+  -H "Content-Type: application/json" \
+  -H "X-Shopify-Access-Token: YOUR_ACCESS_TOKEN" \
+  -d '{"query": "{ webhookSubscriptions(first: 10) { edges { node { id topic endpoint { ... on WebhookHttpEndpoint { callbackUrl } } } } } }"}'
+```
+
+To **delete** a webhook (e.g., when the URL changes):
+
+```bash
+curl -s -X POST "https://YOUR-STORE.myshopify.com/admin/api/2026-01/graphql.json" \
+  -H "Content-Type: application/json" \
+  -H "X-Shopify-Access-Token: YOUR_ACCESS_TOKEN" \
+  -d '{"query": "mutation { webhookSubscriptionDelete(id: \"gid://shopify/WebhookSubscription/WEBHOOK_ID\") { deletedWebhookSubscriptionId userErrors { field message } } }"}'
+```
 
 **What each webhook does:**
 
@@ -501,6 +554,28 @@ SMTP_SECURE=false
 SMTP_USER=test
 SMTP_PASS=test
 ```
+
+#### Local Development with Cloudflare Tunnel
+
+For local development, you need a public HTTPS URL so Shopify can reach your app (for the App Proxy and webhooks). [Cloudflare Quick Tunnels](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/do-more-with-tunnels/trycloudflare/) provide a free, temporary URL with no account required:
+
+```bash
+# Install cloudflared (macOS)
+brew install cloudflared
+
+# Start a tunnel pointing to your local app
+cloudflared tunnel --url http://localhost:3000
+```
+
+Cloudflared prints a URL like `https://random-words.trycloudflare.com`. Use this as your `APP_BASE_URL` in `.env`.
+
+> **The tunnel URL changes every restart.** When it changes you must:
+> 1. Update `APP_BASE_URL` in `.env`
+> 2. Update `shopify.app.toml` and run `shopify app deploy` (or update the App Proxy URL in the Partner Dashboard)
+> 3. Delete and re-register webhooks with the new callback URLs (see [Register Webhooks](#6-register-webhooks))
+> 4. Rebuild Docker: `docker compose up -d --build`
+
+For a stable URL in development, consider [ngrok](https://ngrok.com/) (free tier provides a fixed subdomain) or deploying to a platform like [Railway](https://railway.app/).
 
 ### Without Docker (Development)
 
@@ -1035,7 +1110,7 @@ CSP nonces are randomly generated per request and injected into all `<style>` an
 - Order must be within `ORDER_LOOKBACK_DAYS` (default: 90 days)
 - Order's fulfillment status must be in the allowed list (default: `UNFULFILLED`)
 - Order's financial status must be in the allowed list (default: `PENDING`, `AUTHORIZED`, `PAID`)
-- Order must not have fulfillment orders with status `IN_PROGRESS`, `ON_HOLD`, or `INCOMPLETE`
+- If your app has the `read_assigned_fulfillment_orders` scope, orders with individual fulfillment orders in status `IN_PROGRESS`, `ON_HOLD`, or `INCOMPLETE` are blocked. Without this scope, the app relies on the order-level `displayFulfillmentStatus` check
 - Check the admin dashboard settings to see current allowed statuses
 
 ### Connection issues

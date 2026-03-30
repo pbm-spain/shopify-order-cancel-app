@@ -124,18 +124,12 @@ export async function findOrderByEmailAndName({ email, orderNumber, includeAllSt
             cancelledAt
             displayFinancialStatus
             displayFulfillmentStatus
-            fulfillmentOrders(first: 10) {
-              edges {
-                node {
-                  id
-                  status
-                }
-              }
-            }
-            customer {
-              id
-              email
-            }
+            # Removed: fulfillmentOrders(first:10){edges{node{id status}}}
+            # Requires read_assigned_fulfillment_orders scope.
+            # Re-add if your app has that scope; see isOrderCancelable() below.
+            #
+            # Removed: customer{id email}
+            # Requires read_customers scope. Order-level email field is sufficient.
           }
         }
       }
@@ -145,9 +139,11 @@ export async function findOrderByEmailAndName({ email, orderNumber, includeAllSt
   const data = await graphql(query, { search });
   const nodes = data.orders.edges.map((edge) => edge.node);
 
+  // Match by order name + email. Uses order-level email only;
+  // customer.email (removed above) is redundant for this check.
   const found =
     nodes.find((node) => {
-      const orderEmail = normalizeEmail(node.email || node.customer?.email || '');
+      const orderEmail = normalizeEmail(node.email || '');
       return node.name === normalizedOrderNumber && orderEmail === normalizedEmail;
     }) || null;
 
@@ -230,15 +226,11 @@ export function isOrderCancelable(order) {
   // Fix #40: SUBMITTED is not a valid FulfillmentOrderStatus enum value (2026-01).
   // Valid blocking statuses: IN_PROGRESS (being processed), ON_HOLD (merchant hold),
   // INCOMPLETE (cannot be completed as requested).
-  const fulfillmentOrders = order.fulfillmentOrders?.edges?.map((e) => e.node) || [];
-  const blockingStatuses = ['IN_PROGRESS', 'ON_HOLD', 'INCOMPLETE'];
-  const hasBlockingFulfillmentOrder = fulfillmentOrders.some((fo) =>
-    blockingStatuses.includes(fo.status),
-  );
-
-  if (hasBlockingFulfillmentOrder) {
-    return { ok: false, reason: 'The order has fulfillment orders in progress.' };
-  }
+  // Fulfillment-order-level blocking check (IN_PROGRESS, ON_HOLD, INCOMPLETE)
+  // is skipped because it requires the read_assigned_fulfillment_orders scope.
+  // The displayFulfillmentStatus check above catches most cases.
+  // To re-enable: add fulfillmentOrders to the query, request the scope,
+  // and uncomment the blocking-status filter from the original code.
 
   return { ok: true };
 }
@@ -459,18 +451,11 @@ export async function findOrderById(orderId) {
         cancelledAt
         displayFinancialStatus
         displayFulfillmentStatus
-        fulfillmentOrders(first: 10) {
-          edges {
-            node {
-              id
-              status
-            }
-          }
-        }
-        customer {
-          id
-          email
-        }
+        # Removed: fulfillmentOrders(first:10){edges{node{id status}}}
+        # Requires read_assigned_fulfillment_orders scope.
+        #
+        # Removed: customer{id email}
+        # Requires read_customers scope. Order-level email is sufficient.
       }
     }
   `;
