@@ -967,6 +967,7 @@ The test suite uses **Vitest** as the test runner, **supertest** for HTTP integr
 | Suite | File | Priority | What It Tests |
 |---|---|---|---|
 | Cancel Flow | `cancel-flow.test.js` | P0/P1 | Form CSRF validation, App Proxy HMAC verification, input validation, full cancellation flow, duplicate request prevention |
+| E2E Confirm | `e2e-confirm.test.js` | P0/P1 | End-to-end confirmation link flow, token validation, order re-verification, auto-refund and manual-refund paths |
 | Refund Flow | `refund-flow.test.js` | P0/P1 | Refund approval/denial, atomic state transitions, webhook-driven sync, idempotency |
 | Admin Auth | `admin-auth.test.js` | P0/P1 | Bearer token auth, session auth, login/logout flow, rate limiting, open redirect prevention |
 | Webhook HMAC | `webhook-hmac.test.js` | P0/P1 | HMAC signature verification, deduplication, timing safety, all three webhook handlers |
