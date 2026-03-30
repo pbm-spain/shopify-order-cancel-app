@@ -27,6 +27,7 @@ import { requireAdmin, adminLogin, adminLogout, startSessionCleanup, stopSession
 import { logger, auditLog } from './logger.js';
 import { verifyWebhookSignature, handleOrderUpdated, handleOrderCancelled, handleRefundCreated } from './webhooks.js';
 import { startEmailQueue, stopEmailQueue } from './emailQueue.js';
+import morgan from 'morgan';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -89,6 +90,7 @@ app.use((req, res, next) => {
   next();
 });
 
+app.use(morgan('combined'));
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, '..', 'public')));
 

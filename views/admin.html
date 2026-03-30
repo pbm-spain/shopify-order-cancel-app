@@ -160,7 +160,7 @@
       saveTimeout = setTimeout(() => savedIndicator.classList.remove('show'), 2000);
     }
 
-    async function saveStatuses(group) {
+    async function saveStatuses(group, event) {
       const settingKey = group === 'fulfillment' ? 'allowed_fulfillment_statuses' : 'allowed_financial_statuses';
       const container = document.getElementById(group + 'Group');
       const checked = [...container.querySelectorAll('input[type="checkbox"]:checked')].map(cb => cb.value);
@@ -190,10 +190,10 @@
     }
 
     document.getElementById('fulfillmentGroup').addEventListener('change', (e) => {
-      if (e.target.type === 'checkbox') saveStatuses('fulfillment');
+      if (e.target.type === 'checkbox') saveStatuses('fulfillment', e);
     });
     document.getElementById('financialGroup').addEventListener('change', (e) => {
-      if (e.target.type === 'checkbox') saveStatuses('financial');
+      if (e.target.type === 'checkbox') saveStatuses('financial', e);
     });
 
     // ─── Approve / Deny buttons (with CSRF token) ─────────
