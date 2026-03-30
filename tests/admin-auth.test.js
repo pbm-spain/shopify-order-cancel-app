@@ -26,22 +26,42 @@ beforeEach(() => {
 
 const ADMIN_TOKEN = process.env.ADMIN_API_TOKEN;
 
+/**
+ * Helper: get the login page and extract the CSRF token + cookies.
+ * The login page is served by GET /admin when unauthenticated.
+ */
+async function getLoginCsrf() {
+  const loginPageRes = await request(app)
+    .get('/admin')
+    .set('Accept', 'text/html');
+
+  const csrfMatch = loginPageRes.text.match(/name="_csrf"\s+value="([^"]+)"/);
+  const csrfToken = csrfMatch ? csrfMatch[1] : '';
+  const cookies = loginPageRes.headers['set-cookie'] || [];
+  const cookieHeader = cookies.map((c) => c.split(';')[0]).join('; ');
+  return { csrfToken, cookieHeader };
+}
+
 describe('Open Redirect Prevention', () => {
   it('redirects to /admin for external URLs', async () => {
+    const { csrfToken, cookieHeader } = await getLoginCsrf();
     const res = await request(app)
       .post('/admin/login')
       .set('Content-Type', 'application/x-www-form-urlencoded')
-      .send(`token=${ADMIN_TOKEN}&redirect=https://evil.com`);
+      .set('Cookie', cookieHeader)
+      .send(`token=${ADMIN_TOKEN}&redirect=https://evil.com&_csrf=${csrfToken}`);
 
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/admin');
   });
 
   it('allows redirect to /admin subpaths', async () => {
+    const { csrfToken, cookieHeader } = await getLoginCsrf();
     const res = await request(app)
       .post('/admin/login')
       .set('Content-Type', 'application/x-www-form-urlencoded')
-      .send(`token=${ADMIN_TOKEN}&redirect=/admin?page=2`);
+      .set('Cookie', cookieHeader)
+      .send(`token=${ADMIN_TOKEN}&redirect=/admin?page=2&_csrf=${csrfToken}`);
 
     expect(res.status).toBe(302);
     expect(res.headers.location).toContain('/admin');
@@ -88,20 +108,34 @@ describe('Admin Authentication', () => {
     });
 
     it('rejects login with wrong token', async () => {
+      const { csrfToken, cookieHeader } = await getLoginCsrf();
       const res = await request(app)
         .post('/admin/login')
         .set('Content-Type', 'application/x-www-form-urlencoded')
-        .send('token=wrong_password&redirect=/admin');
+        .set('Cookie', cookieHeader)
+        .send(`token=wrong_password&redirect=/admin&_csrf=${csrfToken}`);
 
       expect(res.status).toBe(401);
       expect(res.text).toContain('Incorrect token');
     });
 
-    it('successful login sets session cookie and redirects', async () => {
+    it('rejects login without CSRF token', async () => {
       const res = await request(app)
         .post('/admin/login')
         .set('Content-Type', 'application/x-www-form-urlencoded')
         .send(`token=${ADMIN_TOKEN}&redirect=/admin`);
+
+      expect(res.status).toBe(403);
+      expect(res.text).toContain('CSRF');
+    });
+
+    it('successful login sets session cookie and redirects', async () => {
+      const { csrfToken, cookieHeader } = await getLoginCsrf();
+      const res = await request(app)
+        .post('/admin/login')
+        .set('Content-Type', 'application/x-www-form-urlencoded')
+        .set('Cookie', cookieHeader)
+        .send(`token=${ADMIN_TOKEN}&redirect=/admin&_csrf=${csrfToken}`);
 
       expect(res.status).toBe(302);
       expect(res.headers.location).toBe('/admin');
@@ -115,12 +149,19 @@ describe('Admin Authentication', () => {
     });
 
     it('session cookie grants access to /admin', async () => {
+      const { csrfToken, cookieHeader: loginCookies } = await getLoginCsrf();
       const loginRes = await request(app)
         .post('/admin/login')
         .set('Content-Type', 'application/x-www-form-urlencoded')
-        .send(`token=${ADMIN_TOKEN}&redirect=/admin`);
+        .set('Cookie', loginCookies)
+        .send(`token=${ADMIN_TOKEN}&redirect=/admin&_csrf=${csrfToken}`);
 
-      const cookies = loginRes.headers['set-cookie'];
+      if (loginRes.status === 429) {
+        // Rate limited — skip gracefully
+        return;
+      }
+
+      const cookies = loginRes.headers['set-cookie'] || [];
       const cookieHeader = cookies.map((c) => c.split(';')[0]).join('; ');
 
       const adminRes = await request(app)
@@ -132,16 +173,14 @@ describe('Admin Authentication', () => {
     });
 
     it('logout clears session and blocks subsequent access', async () => {
-      // Use the login from earlier tests — we just need a valid session cookie
-      // Login (may be rate limited, so check)
+      const { csrfToken, cookieHeader: loginCookies } = await getLoginCsrf();
       const loginRes = await request(app)
         .post('/admin/login')
         .set('Content-Type', 'application/x-www-form-urlencoded')
-        .send(`token=${ADMIN_TOKEN}&redirect=/admin`);
+        .set('Cookie', loginCookies)
+        .send(`token=${ADMIN_TOKEN}&redirect=/admin&_csrf=${csrfToken}`);
 
       if (loginRes.status === 429) {
-        // Rate limited — skip this test gracefully
-        // The logout logic is simple enough that other session tests cover it
         return;
       }
 

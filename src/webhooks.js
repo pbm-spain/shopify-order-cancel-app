@@ -190,7 +190,7 @@ export async function handleOrderUpdated(req, res) {
       traceId: req.traceId,
     });
     // Return 200 OK to prevent Shopify from retrying indefinitely
-    return res.json({ ok: false, error: error.message });
+    return res.json({ ok: false, error: 'Internal processing error' });
   }
 }
 
@@ -265,7 +265,7 @@ export async function handleOrderCancelled(req, res) {
       error: error.message,
       traceId: req.traceId,
     });
-    return res.json({ ok: false, error: error.message });
+    return res.json({ ok: false, error: 'Internal processing error' });
   }
 }
 
@@ -339,6 +339,6 @@ export async function handleRefundCreated(req, res) {
       error: error.message,
       traceId: req.traceId,
     });
-    return res.json({ ok: false, error: error.message });
+    return res.json({ ok: false, error: 'Internal processing error' });
   }
 }

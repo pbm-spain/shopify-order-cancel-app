@@ -89,7 +89,8 @@ export function requireAdmin(req, res, next) {
       if (session.ip && session.ip !== clientIp) {
         sessions.delete(sessionToken);
         if (req.accepts('html')) {
-          return res.status(401).send(loginPage(req.originalUrl, 'Session IP mismatch. Please log in again.', res.locals.nonce));
+          const csrfToken = generateLoginCsrf(req, res);
+          return res.status(401).send(loginPage(req.originalUrl, 'Session IP mismatch. Please log in again.', res.locals.nonce, csrfToken));
         }
         return res.status(401).json({ error: 'Unauthorized' });
       }
@@ -101,7 +102,8 @@ export function requireAdmin(req, res, next) {
 
   // Not authenticated — show login page or return 401
   if (req.accepts('html')) {
-    return res.status(401).send(loginPage(req.originalUrl, '', res.locals.nonce));
+    const csrfToken = generateLoginCsrf(req, res);
+    return res.status(401).send(loginPage(req.originalUrl, '', res.locals.nonce, csrfToken));
   }
   return res.status(401).json({ error: 'Unauthorized' });
 }
@@ -111,9 +113,17 @@ export function requireAdmin(req, res, next) {
  * Fix #1: Validate redirect parameter to prevent open redirects.
  */
 export function adminLogin(req, res) {
+  // Validate CSRF token on login POST
+  const csrfError = validateLoginCsrf(req);
+  if (csrfError) {
+    const csrfToken = generateLoginCsrf(req, res);
+    return res.status(403).send(loginPage(req.body.redirect || '/admin', 'Invalid CSRF token. Please try again.', res.locals.nonce, csrfToken));
+  }
+
   const { token } = req.body;
   if (!token || !safeCompare(hashToken(token), config.adminApiToken)) {
-    return res.status(401).send(loginPage(req.body.redirect || '/admin', 'Incorrect token.', res.locals.nonce));
+    const csrfToken = generateLoginCsrf(req, res);
+    return res.status(401).send(loginPage(req.body.redirect || '/admin', 'Incorrect token.', res.locals.nonce, csrfToken));
   }
 
   // Generate opaque session token (NOT the API token)
@@ -211,7 +221,53 @@ export function adminCsrfValidate(req, res, next) {
   next();
 }
 
-function loginPage(redirect = '/admin', error = '', nonce = '') {
+/**
+ * Generate a CSRF token for the login form and set the session cookie.
+ * Reuses existing session if available.
+ */
+function generateLoginCsrf(req, res) {
+  const sessionId = req.cookies?.[CSRF_COOKIE] || crypto.randomBytes(16).toString('hex');
+
+  let session = csrfSessions.get(sessionId);
+  if (!session || !session.csrfToken) {
+    const csrfToken = crypto.randomBytes(32).toString('hex');
+    session = { csrfToken, createdAt: Date.now() };
+    csrfSessions.set(sessionId, session);
+  }
+
+  res.cookie(CSRF_COOKIE, sessionId, {
+    httpOnly: true,
+    sameSite: 'Strict',
+    secure: config.appBaseUrl.startsWith('https'),
+    maxAge: SESSION_MAX_AGE_MS,
+  });
+
+  return session.csrfToken;
+}
+
+/**
+ * Validate the CSRF token submitted with the login form.
+ * Returns an error string if invalid, null if valid.
+ */
+function validateLoginCsrf(req) {
+  const sessionId = req.cookies?.[CSRF_COOKIE] || '';
+  const bodyToken = req.body?._csrf || '';
+
+  if (!sessionId || !bodyToken) return 'missing';
+
+  const session = csrfSessions.get(sessionId);
+  if (!session) return 'no-session';
+
+  const storedBuf = Buffer.from(String(session.csrfToken));
+  const bodyBuf = Buffer.from(String(bodyToken));
+  if (storedBuf.length !== bodyBuf.length || !crypto.timingSafeEqual(storedBuf, bodyBuf)) {
+    return 'mismatch';
+  }
+
+  return null;
+}
+
+function loginPage(redirect = '/admin', error = '', nonce = '', csrfToken = '') {
   const safeRedirect = String(redirect).replace(/"/g, '&quot;');
   const safeError = error ? `<p class="error">${String(error).replace(/</g, '&lt;').replace(/>/g, '&gt;')}</p>` : '';
   const nonceAttr = nonce ? ` nonce="${nonce}"` : '';
@@ -235,6 +291,7 @@ function loginPage(redirect = '/admin', error = '', nonce = '') {
   <p>Enter your admin token to access the dashboard.</p>
   <form method="post" action="/admin/login">
     <input type="hidden" name="redirect" value="${safeRedirect}" />
+    <input type="hidden" name="_csrf" value="${csrfToken}" />
     <input type="password" name="token" placeholder="ADMIN_API_TOKEN" required autofocus />
     <button type="submit">Sign In</button>
     ${safeError}

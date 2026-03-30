@@ -12,8 +12,8 @@ RUN npm ci --omit=dev
 # ── Stage 2: Production image ────────────────────────────────────────
 FROM node:20-alpine AS production
 
-# Security: install curl for healthcheck, then create non-root user
-RUN apk add --no-cache curl \
+# Security: install curl for healthcheck and sqlite3 for backup scripts, then create non-root user
+RUN apk add --no-cache curl sqlite \
     && addgroup -g 1001 -S appgroup \
     && adduser -u 1001 -S appuser -G appgroup
 

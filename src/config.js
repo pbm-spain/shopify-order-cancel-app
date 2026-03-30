@@ -74,7 +74,14 @@ export const config = {
   // Webhooks
   webhookSecret: env('SHOPIFY_WEBHOOK_SECRET'),
 
-  // Fix #43: Reverse proxy trust. Set TRUST_PROXY=1 when behind one proxy.
+  // Fix #43: Reverse proxy trust. Set TRUST_PROXY=1 or TRUST_PROXY=true when behind one proxy.
+  // Accepts: false/0 (disabled, default), true/1 (trust one hop), or a specific value like "loopback".
   // Default false (safest) — prevents X-Forwarded-For spoofing of rate limits.
-  trustProxy: process.env.TRUST_PROXY === '1' ? 1 : false,
+  trustProxy: (() => {
+    const val = (process.env.TRUST_PROXY || '').trim().toLowerCase();
+    if (!val || val === '0' || val === 'false') return false;
+    if (val === '1' || val === 'true') return 1;
+    // Allow specific values like "loopback", "linklocal", "uniquelocal", or CIDR ranges
+    return val;
+  })(),
 };

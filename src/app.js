@@ -128,6 +128,15 @@ if (process.env.NODE_ENV !== 'test') {
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
+// ─── Cache-Control for sensitive pages ──────────────────────────────
+// Prevent browsers and proxies from caching pages that contain CSRF tokens,
+// session data, or user-specific content (admin dashboard, login, cancel forms).
+function noCacheHeaders(_req, res, next) {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  next();
+}
+
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // Rate limit on cancellation request endpoint (by IP)
@@ -193,7 +202,7 @@ app.get('/health', (_req, res) => {
 
 // ─── Form (with CSRF token) ──────────────────────────────────────────
 
-app.get('/cancel-order', csrfGenerate, (_req, res) => {
+app.get('/cancel-order', noCacheHeaders, csrfGenerate, (_req, res) => {
   const template = fs.readFileSync(path.join(__dirname, '..', 'views', 'form.html'), 'utf8');
   const html = template
     .replace(/\{\{CSRF_TOKEN\}\}/g, res.locals.csrfToken)
@@ -384,7 +393,7 @@ app.post('/proxy/request', cancelRateLimit, emailRateLimit, async (req, res) => 
 
 // ─── Confirmation (email link click, with rate limiting) ──────────────
 
-app.get('/confirm', confirmRateLimit, async (req, res) => {
+app.get('/confirm', noCacheHeaders, confirmRateLimit, async (req, res) => {
   try {
     const token = String(req.query.token || '');
     if (!token) {
@@ -549,12 +558,12 @@ app.post('/webhooks/refunds/create', async (req, res) => {
 // ADMIN ROUTES
 // ═══════════════════════════════════════════════════════════════════════
 
-app.post('/admin/login', adminLoginRateLimit, adminLogin);
+app.post('/admin/login', noCacheHeaders, adminLoginRateLimit, adminLogin);
 app.get('/admin/logout', adminLogout);
 
 // ─── Admin Dashboard ─────────────────────────────────────────────────
 
-app.get('/admin', requireAdmin, adminCsrfGenerate, (_req, res) => {
+app.get('/admin', noCacheHeaders, requireAdmin, adminCsrfGenerate, (_req, res) => {
   const template = fs.readFileSync(path.join(__dirname, '..', 'views', 'admin.html'), 'utf8');
   const autoRefund = isAutoRefundEnabled();
 
