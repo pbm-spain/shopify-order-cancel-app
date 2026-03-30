@@ -4,59 +4,172 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Request Cancellation</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet" />
     <style nonce="{{NONCE}}">
-      * { box-sizing: border-box; margin: 0; padding: 0; }
-      body { font-family: 'Roboto', sans-serif; background: #eff0f5; color: #111; min-height: 100vh; display: flex; justify-content: center; align-items: flex-start; padding: 48px 16px; }
-      .card { background: #fff; border-radius: 20px; padding: 40px 36px; max-width: 520px; width: 100%; box-shadow: 0 2px 12px rgba(0,0,0,.06); }
-      h1 { font-size: 26px; font-weight: 700; margin-bottom: 10px; color: #0e1b4d; }
-      p.intro { font-size: 15px; color: #555; line-height: 1.55; margin-bottom: 24px; }
-      label { display: block; margin: 16px 0 6px; font-weight: 500; font-size: 14px; letter-spacing: .02em; }
-      input:not([type="hidden"]) { width: 100%; padding: 13px 18px; border: 1px solid #d0d1d6; border-radius: 26px; font-family: inherit; font-size: 15px; transition: border-color .2s; outline: none; }
-      input:focus { border-color: #e82127; box-shadow: 0 0 0 3px rgba(232,33,39,.1); }
-      button { margin-top: 24px; width: 100%; background: #e82127; color: #eff0f5; border: 0; padding: 14px; border-radius: 40px; cursor: pointer; font-size: 16px; font-weight: 600; font-family: inherit; letter-spacing: .03em; transition: background .2s; }
-      button:hover { background: #b73229; }
-      button:disabled { background: #74757a; color: #fff; cursor: not-allowed; }
-      p.small { color: #777; font-size: 13px; margin-top: 18px; text-align: center; }
-      .error { color: #e82127; font-size: 13px; display: none; margin-top: 6px; padding-left: 18px; }
-      @media (max-width: 560px) { .card { padding: 28px 20px; } body { padding: 24px 12px; } }
+      /* ── Theme-agnostic wrapper ─────────────────────────────
+         This page renders INSIDE a Shopify theme via App Proxy.
+         We scope everything under .oc-cancel-widget so the
+         store's CSS is never overridden and our styles don't leak. */
+      .oc-cancel-widget {
+        --oc-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        --oc-radius: 12px;
+        --oc-radius-sm: 8px;
+        --oc-primary: #111827;
+        --oc-primary-hover: #374151;
+        --oc-border: #d1d5db;
+        --oc-border-focus: #6366f1;
+        --oc-text: #111827;
+        --oc-text-secondary: #6b7280;
+        --oc-bg-card: #ffffff;
+        --oc-bg-subtle: #f9fafb;
+        --oc-error: #dc2626;
+        --oc-shadow: 0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.06);
+
+        font-family: var(--oc-font);
+        color: var(--oc-text);
+        max-width: 480px;        margin: 2rem auto;
+        padding: 0 1rem;
+      }
+
+      .oc-cancel-widget *,
+      .oc-cancel-widget *::before,
+      .oc-cancel-widget *::after { box-sizing: border-box; }
+
+      .oc-card {
+        background: var(--oc-bg-card);
+        border: 1px solid var(--oc-border);
+        border-radius: var(--oc-radius);
+        padding: 2rem;
+        box-shadow: var(--oc-shadow);
+      }
+
+      .oc-card h1 {
+        font-size: 1.375rem;
+        font-weight: 700;
+        line-height: 1.3;
+        margin: 0 0 0.5rem;
+        color: var(--oc-text);
+      }
+
+      .oc-card .oc-intro {
+        font-size: 0.9375rem;
+        color: var(--oc-text-secondary);
+        line-height: 1.6;
+        margin: 0 0 1.5rem;
+      }
+      .oc-field { margin-bottom: 1rem; }
+
+      .oc-field label {
+        display: block;
+        font-size: 0.8125rem;
+        font-weight: 600;
+        color: var(--oc-text);
+        margin-bottom: 0.375rem;
+        letter-spacing: 0.01em;
+      }
+
+      .oc-field input {
+        width: 100%;
+        padding: 0.625rem 0.875rem;
+        border: 1px solid var(--oc-border);
+        border-radius: var(--oc-radius-sm);
+        font-family: var(--oc-font);
+        font-size: 0.9375rem;
+        color: var(--oc-text);
+        background: var(--oc-bg-card);
+        transition: border-color 0.15s, box-shadow 0.15s;
+        outline: none;
+        -webkit-appearance: none;
+      }
+
+      .oc-field input::placeholder { color: #9ca3af; }
+
+      .oc-field input:focus {
+        border-color: var(--oc-border-focus);        box-shadow: 0 0 0 3px rgba(99,102,241,.15);
+      }
+
+      .oc-field .oc-error {
+        display: none;
+        color: var(--oc-error);
+        font-size: 0.8125rem;
+        margin-top: 0.375rem;
+      }
+
+      .oc-submit {
+        display: block;
+        width: 100%;
+        margin-top: 1.5rem;
+        padding: 0.75rem 1.25rem;
+        background: var(--oc-primary);
+        color: #fff;
+        border: none;
+        border-radius: var(--oc-radius-sm);
+        font-family: var(--oc-font);
+        font-size: 0.9375rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background 0.15s, opacity 0.15s;
+      }
+
+      .oc-submit:hover { background: var(--oc-primary-hover); }
+      .oc-submit:focus-visible { outline: 2px solid var(--oc-border-focus); outline-offset: 2px; }
+      .oc-submit:disabled { opacity: 0.5; cursor: not-allowed; }
+      .oc-footnote {
+        text-align: center;
+        font-size: 0.8125rem;
+        color: var(--oc-text-secondary);
+        margin: 1rem 0 0;
+      }
+
+      @media (max-width: 480px) {
+        .oc-cancel-widget { padding: 0 0.75rem; margin: 1.5rem auto; }
+        .oc-card { padding: 1.5rem 1.25rem; }
+      }
     </style>
   </head>
   <body>
-    <div class="card">
-      <h1>Request Cancellation</h1>
-      <p class="intro">Enter the email address associated with your order and your order number. We will send you an email to confirm the cancellation.</p>
-      <form method="post" action="/apps/order-cancel/proxy/request" id="cancelForm">
-        <label for="email">Order Email</label>
-        <input id="email" name="email" type="email" required autocomplete="email" />
+    <div class="oc-cancel-widget" role="main">
+      <div class="oc-card">
+        <h1>Request Order Cancellation</h1>
+        <p class="oc-intro">Enter the email address and order number associated with your purchase. We'll send you a confirmation email to complete the cancellation.</p>
 
-        <label for="orderNumber">Order Number</label>
-        <input id="orderNumber" name="orderNumber" type="text" placeholder="#1234" required pattern="#[1-9]\d{0,18}" title="Order number must start with # followed by 1-19 digits (e.g. #1234)" />
-        <span class="error" id="orderError">Please enter a valid order number (e.g. #1234)</span>
+        <form method="post" action="/apps/order-cancel/request" id="cancelForm" novalidate>
+          <div class="oc-field">
+            <label for="oc-email">Email Address</label>
+            <input id="oc-email" name="email" type="email" required autocomplete="email" placeholder="you@example.com" />
+          </div>
 
-        <button type="submit" id="submitBtn">Send Confirmation Email</button>
-      </form>
-      <p class="small">Cancellation is only available if the order has not been shipped yet.</p>
+          <div class="oc-field">
+            <label for="oc-order">Order Number</label>
+            <input id="oc-order" name="orderNumber" type="text" placeholder="#1001" required                   pattern="#[1-9]\d{0,18}"
+                   title="Order number must start with # followed by digits (e.g. #1001)" />
+            <div class="oc-error" id="orderError" role="alert">Please enter a valid order number (e.g. #1001)</div>
+          </div>
+
+          <button type="submit" class="oc-submit" id="submitBtn">Send Confirmation Email</button>
+        </form>
+
+        <p class="oc-footnote">Cancellation is only available for orders that have not yet shipped.</p>
+      </div>
     </div>
 
     <script nonce="{{NONCE}}">
-      const form = document.getElementById('cancelForm');
-      const orderInput = document.getElementById('orderNumber');
-      const orderError = document.getElementById('orderError');
-      const submitBtn = document.getElementById('submitBtn');
+      (function() {
+        var form = document.getElementById('cancelForm');
+        var orderInput = document.getElementById('oc-order');
+        var orderError = document.getElementById('orderError');
+        var submitBtn = document.getElementById('submitBtn');
 
-      orderInput.addEventListener('input', () => {
-        const val = orderInput.value.trim();
-        const valid = /^#[1-9]\d{0,18}$/.test(val);
-        orderError.style.display = val && !valid ? 'block' : 'none';
-      });
+        orderInput.addEventListener('input', function() {
+          var val = orderInput.value.trim();
+          var valid = /^#[1-9]\d{0,18}$/.test(val);
+          orderError.style.display = val && !valid ? 'block' : 'none';
+        });
 
-      form.addEventListener('submit', () => {
-        submitBtn.disabled = true;
-        submitBtn.textContent = 'Sending...';
-      });
+        form.addEventListener('submit', function() {
+          submitBtn.disabled = true;
+          submitBtn.textContent = 'Sending\u2026';
+        });
+      })();
     </script>
   </body>
 </html>

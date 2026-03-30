@@ -4,27 +4,90 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Check Your Email</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet" />
     <style nonce="{{NONCE}}">
-      * { box-sizing: border-box; margin: 0; padding: 0; }
-      body { font-family: 'Roboto', sans-serif; background: #eff0f5; color: #111; min-height: 100vh; display: flex; justify-content: center; align-items: flex-start; padding: 48px 16px; }
-      .card { background: #fff; border-radius: 20px; padding: 40px 36px; max-width: 520px; width: 100%; box-shadow: 0 2px 12px rgba(0,0,0,.06); text-align: center; }
-      .icon { width: 56px; height: 56px; background: #0e1b4d; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; margin-bottom: 20px; }
-      .icon svg { width: 28px; height: 28px; stroke: #fff; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-      h1 { font-size: 24px; font-weight: 700; color: #0e1b4d; margin-bottom: 12px; }
-      p { font-size: 15px; color: #555; line-height: 1.55; }
-      @media (max-width: 560px) { .card { padding: 28px 20px; } body { padding: 24px 12px; } }
+      :root {
+        --oc-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        --oc-text: #111827;
+        --oc-text-secondary: #6b7280;
+        --oc-bg: #f3f4f6;
+        --oc-bg-card: #ffffff;
+        --oc-border: #d1d5db;
+        --oc-accent: #6366f1;
+        --oc-radius: 12px;
+        --oc-shadow: 0 1px 3px rgba(0,0,0,.08), 0 4px 6px rgba(0,0,0,.04);
+      }
+
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+      body {
+        font-family: var(--oc-font);
+        background: var(--oc-bg);
+        color: var(--oc-text);
+        min-height: 100vh;
+        display: flex;
+        justify-content: center;
+        align-items: flex-start;
+        padding: 3rem 1rem;        -webkit-font-smoothing: antialiased;
+      }
+
+      .oc-card {
+        background: var(--oc-bg-card);
+        border: 1px solid var(--oc-border);
+        border-radius: var(--oc-radius);
+        padding: 2.5rem 2rem;
+        max-width: 480px;
+        width: 100%;
+        box-shadow: var(--oc-shadow);
+        text-align: center;
+      }
+
+      .oc-icon {
+        width: 56px;
+        height: 56px;
+        background: var(--oc-accent);
+        border-radius: 50%;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        margin-bottom: 1.25rem;
+      }
+
+      .oc-icon svg {
+        width: 26px;
+        height: 26px;
+        stroke: #fff;
+        fill: none;        stroke-width: 2;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+
+      .oc-card h1 {
+        font-size: 1.375rem;
+        font-weight: 700;
+        margin-bottom: 0.75rem;
+      }
+
+      .oc-card p {
+        font-size: 0.9375rem;
+        color: var(--oc-text-secondary);
+        line-height: 1.6;
+        max-width: 36ch;
+        margin: 0 auto;
+      }
+
+      @media (max-width: 480px) {
+        body { padding: 1.5rem 0.75rem; }
+        .oc-card { padding: 2rem 1.25rem; }
+      }
     </style>
   </head>
   <body>
-    <div class="card">
-      <div class="icon">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2"></rect><polyline points="22 4 12 13 2 4"></polyline></svg>
+    <main class="oc-card" role="status">
+      <div class="oc-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"></rect><polyline points="22 4 12 13 2 4"></polyline></svg>
       </div>
       <h1>Check Your Email</h1>
-      <p>If the details match and the order is still pending shipment, we have sent you an email to confirm the cancellation.</p>
-    </div>
+      <p>If the details match and the order hasn't shipped yet, we've sent you a confirmation email. Please check your inbox and click the link to complete the cancellation.</p>
+    </main>
   </body>
 </html>

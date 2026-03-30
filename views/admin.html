@@ -1,229 +1,462 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Admin - Cancel App</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <title>Admin - Order Cancel</title>
   <style nonce="{{NONCE}}">
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: 'Roboto', sans-serif; color: #111; background: #eff0f5; }
-    .header { background: #0e1b4d; color: #fff; padding: 18px 28px; display: flex; justify-content: space-between; align-items: center; }
-    .header h1 { font-size: 18px; font-weight: 700; letter-spacing: .03em; }
-    .header a { color: rgba(255,255,255,.65); text-decoration: none; font-size: 14px; font-weight: 500; transition: color .2s; }
-    .header a:hover { color: #fff; }
-    .container { max-width: 920px; margin: 28px auto; padding: 0 16px; }
-    .card { background: #fff; border-radius: 20px; padding: 28px; margin-bottom: 22px; box-shadow: 0 2px 12px rgba(0,0,0,.06); }
-    .card h2 { font-size: 18px; font-weight: 700; margin-bottom: 16px; color: #0e1b4d; }
-    .card h3 { font-size: 14px; font-weight: 600; margin: 18px 0 10px; color: #333; letter-spacing: .02em; }
-    .card-desc { font-size: 13px; color: #666; margin-bottom: 14px; line-height: 1.5; }
-    .toggle-row { display: flex; align-items: center; justify-content: space-between; }
-    .toggle-label { font-size: 15px; font-weight: 500; }
-    .toggle-sublabel { font-size: 13px; color: #666; margin-top: 3px; line-height: 1.45; }
-    .switch { position: relative; width: 52px; height: 28px; flex-shrink: 0; }
-    .switch input { opacity: 0; width: 0; height: 0; }
-    .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background: #d0d1d6; border-radius: 28px; transition: .3s; }
-    .slider::before { content: ''; position: absolute; height: 22px; width: 22px; left: 3px; bottom: 3px; background: #fff; border-radius: 50%; transition: .3s; }
-    input:checked + .slider { background: #e82127; }
-    input:checked + .slider::before { transform: translateX(24px); }
-    .status-badge { display: inline-block; padding: 4px 12px; border-radius: 40px; font-size: 12px; font-weight: 600; letter-spacing: .02em; }
-    .badge-pending { background: #fef3c7; color: #92400e; }
-    .badge-approved { background: #d1fae5; color: #065f46; }
-    .badge-denied { background: #fee2e2; color: #991b1b; }
-    .badge-auto { background: #dbeafe; color: #1e40af; }
-    table { width: 100%; border-collapse: collapse; font-size: 14px; }
-    th { text-align: left; padding: 10px 12px; border-bottom: 2px solid #e0e1e6; font-weight: 600; color: #555; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
-    td { padding: 10px 12px; border-bottom: 1px solid #f0f0f3; vertical-align: middle; }
-    tr:hover td { background: rgba(14,27,77,.015); }
-    .btn { display: inline-block; padding: 7px 18px; border: 0; border-radius: 40px; cursor: pointer; font-size: 13px; font-weight: 600; text-decoration: none; font-family: inherit; transition: background .2s; }
-    .btn-approve { background: #e82127; color: #fff; }
-    .btn-approve:hover { background: #b73229; }
-    .btn-deny { background: #eff0f5; color: #333; margin-left: 6px; }
-    .btn-deny:hover { background: #d0d1d6; }
-    .btn:focus-visible, .pagination-btn:focus-visible { outline: 2px solid #0e1b4d; outline-offset: 2px; }
-    .empty { color: #999; font-size: 14px; padding: 24px 0; text-align: center; }
-    .flash { padding: 14px 18px; border-radius: 14px; margin-bottom: 18px; font-size: 14px; font-weight: 500; }
-    .flash-success { background: #d1fae5; color: #065f46; }
-    .flash-error { background: #fee2e2; color: #991b1b; }
-    .cb-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 16px; }
-    .cb-label { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 12px; cursor: pointer; font-size: 14px; transition: background .15s; }
-    .cb-label:hover { background: #f5f5f8; }
-    .cb-label input[type="checkbox"] { width: 16px; height: 16px; accent-color: #e82127; cursor: pointer; flex-shrink: 0; }
+    :root {
+      --oc-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      --oc-radius: 12px;
+      --oc-radius-sm: 8px;
+      --oc-primary: #111827;
+      --oc-primary-hover: #374151;
+      --oc-accent: #6366f1;
+      --oc-border: #e5e7eb;
+      --oc-border-strong: #d1d5db;
+      --oc-text: #111827;
+      --oc-text-secondary: #6b7280;
+      --oc-text-muted: #9ca3af;
+      --oc-bg: #f3f4f6;
+      --oc-bg-card: #ffffff;
+      --oc-bg-subtle: #f9fafb;
+      --oc-success: #059669;
+      --oc-success-bg: #ecfdf5;
+      --oc-warning-bg: #fffbeb;
+      --oc-warning-text: #92400e;
+      --oc-error: #dc2626;
+      --oc-error-bg: #fef2f2;
+      --oc-info-bg: #eff6ff;
+      --oc-info-text: #1e40af;
+      --oc-shadow: 0 1px 3px rgba(0,0,0,.06);
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: var(--oc-font);
+      color: var(--oc-text);
+      background: var(--oc-bg);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── Header ────────────────────────────────────────────────── */
+    .oc-header {
+      background: var(--oc-primary);
+      color: #fff;
+      padding: 0 1.5rem;
+      height: 56px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    .oc-header h1 { font-size: 1rem; font-weight: 700; letter-spacing: 0.02em; }
+    .oc-header a {
+      color: rgba(255,255,255,.7);
+      text-decoration: none;
+      font-size: 0.8125rem;
+      font-weight: 500;
+      transition: color 0.15s;
+    }
+    .oc-header a:hover { color: #fff; }
+
+    /* ── Layout ────────────────────────────────────────────────── */
+    .oc-container {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 1.5rem 1rem 3rem;
+    }
+
+    /* ── Cards ─────────────────────────────────────────────────── */
+    .oc-card {
+      background: var(--oc-bg-card);
+      border: 1px solid var(--oc-border);
+      border-radius: var(--oc-radius);
+      padding: 1.5rem;
+      margin-bottom: 1rem;
+      box-shadow: var(--oc-shadow);
+    }
+    .oc-card h2 {
+      font-size: 1rem;
+      font-weight: 700;
+      margin-bottom: 1rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .oc-card h2 .oc-count {
+      font-weight: 400;
+      color: var(--oc-text-secondary);
+      font-size: 0.875rem;
+    }
+    .oc-card h3 {
+      font-size: 0.8125rem;
+      font-weight: 600;
+      color: var(--oc-text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin: 1.25rem 0 0.625rem;
+    }
+    .oc-card-desc {
+      font-size: 0.8125rem;
+      color: var(--oc-text-secondary);
+      line-height: 1.5;
+      margin-bottom: 0.75rem;
+    }
+
+    /* ── Flash messages ──────────────────────────────────────── */
+    .flash {
+      padding: 0.75rem 1rem;
+      border-radius: var(--oc-radius-sm);
+      margin-bottom: 1rem;
+      font-size: 0.875rem;
+      font-weight: 500;
+      border: 1px solid transparent;
+    }
+    .flash-success { background: var(--oc-success-bg); color: #065f46; border-color: #a7f3d0; }
+    .flash-error { background: var(--oc-error-bg); color: #991b1b; border-color: #fecaca; }
+
+    /* ── Toggle switch ──────────────────────────────────────── */
+    .oc-toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+    .oc-toggle-label { font-size: 0.9375rem; font-weight: 600; }
+    .oc-toggle-sublabel { font-size: 0.8125rem; color: var(--oc-text-secondary); margin-top: 0.25rem; line-height: 1.5; }
+
+    .oc-switch { position: relative; width: 44px; height: 24px; flex-shrink: 0; }
+    .oc-switch input { opacity: 0; width: 0; height: 0; position: absolute; }
+    .oc-slider {
+      position: absolute; cursor: pointer;
+      inset: 0;
+      background: var(--oc-border-strong);
+      border-radius: 24px;
+      transition: background 0.2s;
+    }
+    .oc-slider::before {
+      content: '';
+      position: absolute;
+      height: 18px; width: 18px;
+      left: 3px; bottom: 3px;
+      background: #fff;
+      border-radius: 50%;
+      transition: transform 0.2s;
+      box-shadow: 0 1px 2px rgba(0,0,0,.12);
+    }
+    .oc-switch input:checked + .oc-slider { background: var(--oc-success); }
+    .oc-switch input:checked + .oc-slider::before { transform: translateX(20px); }
+    .oc-switch input:focus-visible + .oc-slider { outline: 2px solid var(--oc-accent); outline-offset: 2px; }
+
+    /* ── Checkbox grid ──────────────────────────────────────── */
+    .cb-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.25rem 1rem; }
+    .cb-label {
+      display: flex; align-items: center; gap: 0.5rem;
+      padding: 0.5rem 0.625rem;
+      border-radius: var(--oc-radius-sm);
+      cursor: pointer;
+      font-size: 0.875rem;
+      transition: background 0.1s;
+    }
+    .cb-label:hover { background: var(--oc-bg-subtle); }
+    .cb-label input[type="checkbox"] {
+      width: 16px; height: 16px;
+      accent-color: var(--oc-accent);
+      cursor: pointer; flex-shrink: 0;
+    }
     .cb-text { flex: 1; }
-    .cb-code { font-size: 11px; color: #999; background: #eff0f5; padding: 2px 8px; border-radius: 8px; }
-    .save-indicator { font-size: 13px; color: #e82127; opacity: 0; transition: opacity .3s; margin-left: 8px; font-weight: 500; }
-    .save-indicator.show { opacity: 1; }
-    .divider { border: 0; border-top: 1px solid #eee; margin: 18px 0; }
-    .pagination { display: flex; justify-content: center; align-items: center; gap: 12px; margin-top: 22px; padding-top: 18px; border-top: 1px solid #f0f0f3; }
-    .pagination-btn { padding: 7px 18px; border: 1px solid #d0d1d6; border-radius: 40px; background: #fff; cursor: pointer; font-size: 13px; font-weight: 600; font-family: inherit; transition: all .2s; }
-    .pagination-btn:hover:not(:disabled) { background: #eff0f5; border-color: #0e1b4d; color: #0e1b4d; }
-    .pagination-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-    .pagination-info { font-size: 13px; color: #666; min-width: 120px; text-align: center; }
-    @media (max-width: 600px) { .cb-grid { grid-template-columns: 1fr; } .pagination { gap: 8px; } .pagination-btn { padding: 5px 12px; font-size: 12px; } .pagination-info { min-width: auto; } .card { padding: 20px 16px; border-radius: 16px; } }
+    .cb-code {
+      font-size: 0.6875rem;
+      font-family: "SF Mono", "Fira Code", monospace;
+      color: var(--oc-text-muted);
+      background: var(--oc-bg);
+      padding: 0.125rem 0.5rem;
+      border-radius: 4px;
+    }
+
+    .oc-save-indicator {
+      font-size: 0.75rem;
+      color: var(--oc-success);
+      opacity: 0;
+      transition: opacity 0.2s;
+      font-weight: 500;
+    }
+    .oc-save-indicator.show { opacity: 1; }
+
+    .oc-divider { border: 0; border-top: 1px solid var(--oc-border); margin: 1rem 0; }
+
+    /* ── Status badges ──────────────────────────────────────── */
+    .status-badge {
+      display: inline-block;
+      padding: 0.1875rem 0.625rem;
+      border-radius: 999px;
+      font-size: 0.6875rem;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      text-transform: capitalize;
+    }
+    .badge-pending { background: var(--oc-warning-bg); color: var(--oc-warning-text); }
+    .badge-approved { background: var(--oc-success-bg); color: #065f46; }
+    .badge-denied { background: var(--oc-error-bg); color: #991b1b; }
+    .badge-auto { background: var(--oc-info-bg); color: var(--oc-info-text); }
+
+    /* ── Tables ────────────────────────────────────────────────── */
+    .oc-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 0 -1.5rem; padding: 0 1.5rem; }
+
+    table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+    thead th {
+      text-align: left;
+      padding: 0.5rem 0.75rem;
+      border-bottom: 2px solid var(--oc-border);
+      font-weight: 600;
+      color: var(--oc-text-secondary);
+      font-size: 0.6875rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      white-space: nowrap;
+    }
+    td {
+      padding: 0.625rem 0.75rem;
+      border-bottom: 1px solid var(--oc-border);
+      vertical-align: middle;
+    }
+    tbody tr:last-child td { border-bottom: none; }
+    tbody tr:hover td { background: var(--oc-bg-subtle); }
+
+    /* ── Buttons ───────────────────────────────────────────────── */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      padding: 0.375rem 0.875rem;
+      border: 1px solid transparent;
+      border-radius: var(--oc-radius-sm);
+      cursor: pointer;
+      font-size: 0.8125rem;
+      font-weight: 600;
+      text-decoration: none;
+      font-family: var(--oc-font);
+      transition: all 0.15s;
+      white-space: nowrap;
+    }
+    .btn:focus-visible { outline: 2px solid var(--oc-accent); outline-offset: 2px; }
+
+    .btn-approve {
+      background: var(--oc-primary);
+      color: #fff;
+    }
+    .btn-approve:hover { background: var(--oc-primary-hover); }
+
+    .btn-deny {
+      background: var(--oc-bg-card);
+      color: var(--oc-text);
+      border-color: var(--oc-border-strong);
+      margin-left: 0.375rem;
+    }
+    .btn-deny:hover { background: var(--oc-bg); }
+
+    .oc-actions { display: flex; gap: 0.375rem; }
+
+    .empty {
+      color: var(--oc-text-muted);
+      font-size: 0.875rem;
+      padding: 2rem 0;
+      text-align: center;
+    }
+
+    /* ── Pagination ─────────────────────────────────────────── */
+    .pagination {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 0.75rem;
+      margin-top: 1rem;
+      padding-top: 1rem;
+      border-top: 1px solid var(--oc-border);
+    }
+    .pagination-btn {
+      padding: 0.375rem 1rem;
+      border: 1px solid var(--oc-border-strong);
+      border-radius: var(--oc-radius-sm);
+      background: var(--oc-bg-card);
+      cursor: pointer;
+      font-size: 0.8125rem;
+      font-weight: 600;
+      font-family: var(--oc-font);
+      transition: all 0.15s;
+    }
+    .pagination-btn:hover:not(:disabled) { background: var(--oc-bg); border-color: var(--oc-primary); }
+    .pagination-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+    .pagination-btn:focus-visible { outline: 2px solid var(--oc-accent); outline-offset: 2px; }
+    .pagination-info { font-size: 0.8125rem; color: var(--oc-text-secondary); }
+
+    /* ── Responsive ──────────────────────────────────────────── */
+    @media (max-width: 640px) {
+      .oc-container { padding: 1rem 0.75rem 2rem; }
+      .oc-card { padding: 1.25rem 1rem; border-radius: var(--oc-radius-sm); }
+      .cb-grid { grid-template-columns: 1fr; }
+      .oc-table-wrap { margin: 0 -1rem; padding: 0 1rem; }
+      td, th { padding: 0.5rem; }
+      .oc-actions { flex-direction: column; gap: 0.25rem; }
+      .btn-deny { margin-left: 0; }
+    }
   </style>
 </head>
 <body>
-  <div class="header">
-    <h1>Admin Panel</h1>
+  <header class="oc-header">
+    <h1>Order Cancel &middot; Admin</h1>
     <a href="/admin/logout">Sign Out</a>
-  </div>
+  </header>
 
-  <div class="container">
+  <div class="oc-container">
     {{FLASH_MESSAGE}}
 
     <!-- Toggle Auto-Refund -->
-    <div class="card">
+    <section class="oc-card">
       <h2>Refund Settings</h2>
-      <div class="toggle-row">
+      <div class="oc-toggle-row">
         <div>
-          <div class="toggle-label">Automatic refund on cancellation</div>
-          <div class="toggle-sublabel">
-            If disabled, cancellations are processed without a refund and require your approval.
-          </div>
+          <div class="oc-toggle-label">Automatic refund on cancellation</div>
+          <div class="oc-toggle-sublabel">When disabled, cancellations require your manual approval before a refund is issued.</div>
         </div>
-        <label class="switch">
+        <label class="oc-switch">
           <input type="checkbox" id="autoRefundToggle" {{AUTO_REFUND_CHECKED}} />
-          <span class="slider"></span>
+          <span class="oc-slider"></span>
         </label>
       </div>
-    </div>
+    </section>
 
     <!-- Allowed Order Statuses -->
-    <div class="card">
-      <h2>Allowed Statuses for Cancellation <span class="save-indicator" id="statusSaved">Saved</span></h2>
-      <p class="card-desc">
-        Only orders whose fulfillment status <strong>and</strong> financial status are among the selected options can be cancelled.
-      </p>
+    <section class="oc-card">
+      <h2>Cancellation Rules <span class="oc-save-indicator" id="statusSaved">Saved</span></h2>
+      <p class="oc-card-desc">Only orders whose fulfillment <strong>and</strong> financial status match one of the selected options can be cancelled by the customer.</p>
 
       <h3>Fulfillment Status</h3>
       <div class="cb-grid" id="fulfillmentGroup">
         {{FULFILLMENT_CHECKBOXES}}
       </div>
 
-      <hr class="divider" />
+      <hr class="oc-divider" />
 
       <h3>Financial Status</h3>
       <div class="cb-grid" id="financialGroup">
         {{FINANCIAL_CHECKBOXES}}
       </div>
-    </div>
+    </section>
 
     <!-- Pending Refunds -->
-    <div class="card">
-      <h2>Pending Refunds <span style="font-weight:400;color:#666;font-size:14px;">({{PENDING_COUNT}})</span></h2>
-      {{PENDING_TABLE}}
+    <section class="oc-card">
+      <h2>Pending Refunds <span class="oc-count">({{PENDING_COUNT}})</span></h2>
+      <div class="oc-table-wrap">
+        {{PENDING_TABLE}}
+      </div>
       {{PENDING_PAGINATION}}
-    </div>
+    </section>
 
     <!-- Recent Cancellations -->
-    <div class="card">
+    <section class="oc-card">
       <h2>Recent Cancellations</h2>
-      {{RECENT_TABLE}}
+      <div class="oc-table-wrap">
+        {{RECENT_TABLE}}
+      </div>
       {{RECENT_PAGINATION}}
-    </div>
+    </section>
   </div>
 
-  <!-- CSRF token for admin actions (hidden input, read by JS) -->
   <input type="hidden" id="adminCsrfToken" value="{{CSRF_TOKEN}}" />
-  <!-- Hidden nonce input for CSP compliance -->
-  <noscript></noscript>
 
   <script nonce="{{NONCE}}">
-    // ─── Pagination helper ───────────────────────────────
+    // ─── Pagination ─────────────────────────────────────────
     function goToPage(page, tableType) {
-      const currentUrl = new URL(window.location);
-      currentUrl.searchParams.set('page', String(page));
-      window.location.href = currentUrl.toString();
+      var url = new URL(window.location);
+      url.searchParams.set('page', String(page));
+      window.location.href = url.toString();
     }
 
-    // ─── Toggle auto-refund ──────────────────────────────
-    const adminCsrf = document.getElementById('adminCsrfToken').value;
-    const toggle = document.getElementById('autoRefundToggle');
-    toggle.addEventListener('change', async () => {
+    // ─── Toggle auto-refund ─────────────────────────
+    var adminCsrf = document.getElementById('adminCsrfToken').value;
+    var toggle = document.getElementById('autoRefundToggle');
+    toggle.addEventListener('change', async function() {
       try {
-        const res = await fetch('/admin/api/settings', {
+        var res = await fetch('/admin/api/settings', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ auto_refund: toggle.checked, _csrf: adminCsrf }),
         });
         if (!res.ok) throw new Error('Failed');
-      } catch {
+      } catch(e) {
         toggle.checked = !toggle.checked;
         alert('Error changing setting. Please try again.');
       }
     });
 
-    // ─── Status checkboxes ───────────────────────────────
-    const savedIndicator = document.getElementById('statusSaved');
-    let saveTimeout;
+    // ─── Status checkboxes ──────────────────────────
+    var savedIndicator = document.getElementById('statusSaved');
+    var saveTimeout;
 
     function flashSaved() {
       savedIndicator.classList.add('show');
       clearTimeout(saveTimeout);
-      saveTimeout = setTimeout(() => savedIndicator.classList.remove('show'), 2000);
+      saveTimeout = setTimeout(function() { savedIndicator.classList.remove('show'); }, 2000);
     }
 
     async function saveStatuses(group, event) {
-      const settingKey = group === 'fulfillment' ? 'allowed_fulfillment_statuses' : 'allowed_financial_statuses';
-      const container = document.getElementById(group + 'Group');
-      const checked = [...container.querySelectorAll('input[type="checkbox"]:checked')].map(cb => cb.value);
+      var settingKey = group === 'fulfillment' ? 'allowed_fulfillment_statuses' : 'allowed_financial_statuses';
+      var container = document.getElementById(group + 'Group');
+      var checked = Array.from(container.querySelectorAll('input[type="checkbox"]:checked')).map(function(cb) { return cb.value; });
 
       if (checked.length === 0) {
         alert('You must select at least one status.');
-        // Re-check the one that was just unchecked
         event.target.checked = true;
         return;
       }
 
       try {
-        const res = await fetch('/admin/api/settings', {
+        var res = await fetch('/admin/api/settings', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ key: settingKey, value: checked, _csrf: adminCsrf }),
         });
         if (!res.ok) {
-          const data = await res.json().catch(() => ({}));
+          var data = await res.json().catch(function() { return {}; });
           throw new Error(data.error || 'Failed');
         }
         flashSaved();
-      } catch (err) {
+      } catch(err) {
         alert('Error saving: ' + err.message);
         event.target.checked = !event.target.checked;
       }
     }
 
-    document.getElementById('fulfillmentGroup').addEventListener('change', (e) => {
+    document.getElementById('fulfillmentGroup').addEventListener('change', function(e) {
       if (e.target.type === 'checkbox') saveStatuses('fulfillment', e);
     });
-    document.getElementById('financialGroup').addEventListener('change', (e) => {
+    document.getElementById('financialGroup').addEventListener('change', function(e) {
       if (e.target.type === 'checkbox') saveStatuses('financial', e);
     });
 
-    // ─── Approve / Deny buttons (with CSRF token) ─────────
-    document.querySelectorAll('[data-action]').forEach((btn) => {
-      btn.addEventListener('click', async (e) => {
+    // ─── Approve / Deny ─────────────────────────
+    document.querySelectorAll('[data-action]').forEach(function(btn) {
+      btn.addEventListener('click', function(e) {
         e.preventDefault();
-        const action = btn.dataset.action;
-        const id = btn.dataset.id;
+        var action = btn.dataset.action;
+        var id = btn.dataset.id;
         if (action === 'approve' && !confirm('Approve the refund for this order?')) return;
         if (action === 'deny' && !confirm('Deny the refund?')) return;
 
-        const form = document.createElement('form');
+        var form = document.createElement('form');
         form.method = 'POST';
         form.action = '/admin/refund/' + action;
 
-        const idInput = document.createElement('input');
-        idInput.type = 'hidden';
-        idInput.name = 'id';
-        idInput.value = id;
+        var idInput = document.createElement('input');
+        idInput.type = 'hidden'; idInput.name = 'id'; idInput.value = id;
         form.appendChild(idInput);
 
-        const csrfInput = document.createElement('input');
-        csrfInput.type = 'hidden';
-        csrfInput.name = '_csrf';
-        csrfInput.value = adminCsrf;
+        var csrfInput = document.createElement('input');
+        csrfInput.type = 'hidden'; csrfInput.name = '_csrf'; csrfInput.value = adminCsrf;
         form.appendChild(csrfInput);
 
         document.body.appendChild(form);
